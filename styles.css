@@ -134,3 +134,11 @@ h1,h2,h3{font-family:Georgia,'Times New Roman',serif;letter-spacing:-.04em}
 .empty-state{padding:35px 24px;color:#ceb8b4;background:linear-gradient(140deg,#3f1728,#1f101c);border:1px solid #875361;border-radius:15px;margin:8px 0 22px;max-width:740px}.empty-state h3{font:27px Georgia,serif;color:#ffe1b7;margin:0 0 8px}.empty-state p{font-size:14px;line-height:1.5;color:#cdb7bd}
 @media(max-width:660px){.carousel-game-grid{height:360px;min-height:360px}.carousel-game-grid>.game-card{width:220px!important;height:330px;top:10px}.carousel-game-grid .game-cover{height:192px!important;min-height:192px}.carousel-game-grid .game-card-text h3{font-size:18px!important}.feature-spotlight{min-height:200px}}
 @media(prefers-reduced-motion:reduce){.carousel-game-grid>.game-card,.spotlight-cover,.spotlight-cover.spotlight-flash{animation:none!important;transition:none!important}}
+
+/* Creator-side reporting dialog: keyboard-operable, mobile responsive */
+.lustsino-report-dialog{width:min(440px,calc(100vw - 28px));max-height:min(85vh,720px);overflow:auto;padding:22px;border:1px solid #674159;border-radius:18px;background:#1c121e;color:#f6e9eb;box-shadow:0 30px 90px #000d}
+.lustsino-report-dialog::backdrop{background:#09070ad9;backdrop-filter:blur(6px)}
+.lustsino-report-dialog h3{margin:0 0 9px;font-size:24px}
+.lustsino-report-dialog label{display:block;margin:14px 0;color:#ddcdd7;font-size:13px}
+.lustsino-report-dialog input,.lustsino-report-dialog select,.lustsino-report-dialog textarea{display:block;width:100%;max-width:100%;margin:6px 0 0;padding:12px;border:1px solid #58374c;border-radius:10px;background:#291a2a;color:#fff;box-sizing:border-box}
+.lustsino-report-dialog p{font-size:13px;line-height:1.55}
