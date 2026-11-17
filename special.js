@@ -56,7 +56,7 @@
    state.root.innerHTML=controls('<div class="special-hero-mark">✦ ♠ ✦</div>'+title('WELCOME','Two cards. One twist.','Remember your choices, find them after the shuffle, and stop the reveal reel whenever you like.')+
     '<div class="special-summary">6 theme cards <span>·</span> 2 picks <span>·</span> One mystery reel</div>',
     '<div class="special-actions"><button class="button primary special-big" id="specialEnter">Enter the Special →</button></div>');
-   $('#specialEnter',root).onclick=renderPreference;voice('welcome');
+   $('#specialEnter',root).onclick=()=>{voice('welcome');renderPreference()};
   }
   function renderPreference(){
    stopJobs();state.step='preference';
@@ -84,11 +84,11 @@
    stopJobs();state.step='shuffle';
    state.root.innerHTML=controls(title('03 · SHUFFLE','Track those cards','Keep your eyes on your two cards as the deck rearranges.')+
     '<div class="special-shuffle-board" id="specialShuffleBoard">'+cards.map((c,i)=>
-    '<div class="special-moving-card" data-move-id="'+i+'" style="left:'+(((i+.5)/cards.length)*100)+'%"><span class="special-card-back">✦</span></div>').join('')+'</div>'+
+    '<div class="special-moving-card is-open '+(state.chosen.includes(i)?'special-original-pick':'')+'" data-move-id="'+i+'" style="left:'+(((i+.5)/cards.length)*100)+'%"><span class="special-card-back">✦</span><span class="special-card-face">'+cssEscape(c.label)+'</span></div>').join('')+'</div>'+
     '<p class="special-selection" id="specialShuffleStatus">Mixing the deck…</p>');
    voice('shuffle');
    let rounds=0;
-   const moving=$$('[data-move-id]',root);
+   const moving=$('[data-move-id]',root);
    const perform=()=>{
     if(!alive())return;
     const next=state.permutation.slice();
@@ -98,7 +98,7 @@
     if(++rounds<6)later(perform,520);
     else later(renderRecall,650);
    };
-   later(perform,370);
+   later(()=>{moving.forEach(el=>el.classList.remove('is-open','special-original-pick'));$('#specialShuffleStatus',root).textContent='Follow the cards…';perform()},1100);
   }
   function renderRecall(){
    stopJobs();state.step='recall';state.guesses=[];
@@ -184,7 +184,7 @@
    stopJobs();state.step='gallery';
    const current=state.gallery[state.galleryIndex];
    if(!current){showMissing('No reveal is available.');return}
-   state.root.innerHTML=controls(title('08 · THE GALLERY','Your three discoveries','Swipe or use the arrows. Continue whenever you wish.')+
+   state.root.innerHTML=controls(title('08 · THE GALLERY','Your '+state.gallery.length+' discoveries','Swipe or use the arrows. Continue whenever you wish.')+
     '<div class="special-gallery" id="specialGallery">'+mediaCard(current)+'</div>'+
     '<div class="special-gallery-meta"><span>'+(state.galleryIndex+1)+' / '+state.gallery.length+'</span><strong>'+cssEscape(current.title||'Selected media')+'</strong></div>'+
     '<p class="special-selection">'+cssEscape(current.creator_credit||'Creator credited')+'</p>'+
