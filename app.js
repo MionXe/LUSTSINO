@@ -238,11 +238,11 @@ function renderStudioOverview(root){root.innerHTML=`${studioIntro('Overview','Co
 
 async function renderStudioApplications(root){
  if(!isAdmin||!supabase)return;
- root.innerHTML=studioIntro('House Creator applications','Review identity, age, consent and rights documentation before full verification.')+'<p>Loading applications…</p>';
+ root.innerHTML=studioIntro('House Creator applications','Game creation is available to ordinary player accounts. Only public adult-media publishing requires documented identity, age and rights verification.')+'<p>Loading applications…</p>';
  const {data,error}=await supabase.from('creator_applications').select('id,user_id,note,portfolio_url,created_at,stage').order('created_at',{ascending:false}).limit(100);
  if(error){root.innerHTML='<p>'+escapeHTML(error.message)+'</p>';return}
- root.innerHTML=studioIntro('House Creator applications','Step 1: draft studio access after 20 minutes. Step 2: manual House Master verification before public publishing.')+`<div class="table-scroller"><table><thead><tr><th>APPLICANT</th><th>DATE</th><th>STATUS</th><th>REVIEW</th></tr></thead><tbody>${(data||[]).map(x=>`<tr><td><strong>${escapeHTML(x.user_id.slice(0,8))}</strong><br><small>${escapeHTML(x.note||'No introduction')}</small></td><td>${new Date(x.created_at).toLocaleString()}</td><td>${escapeHTML(x.stage)}</td><td>${x.stage==='pending'?`<button class="table-action" data-approve-app="${escapeHTML(x.id)}">Verify step 2</button> <button class="table-action danger" data-decline-app="${escapeHTML(x.id)}">Decline</button>`:'Reviewed'}</td></tr>`).join('')||'<tr><td colspan="4">No applications yet</td></tr>'}</tbody></table></div>`;
- root.querySelectorAll('[data-approve-app]').forEach(b=>b.onclick=async()=>{const evidence=prompt('Enter the internal reference for completed identity, legal-age, consent and content-rights checks:');if(!evidence||evidence.trim().length<8)return;const {error}=await supabase.rpc('lustsino_decide_creator',{p_application:b.dataset.approveApp,p_approve:true,p_evidence_ref:evidence.trim()});if(error)return notify(error.message);notify('House Creator verified.');renderStudioApplications(root)});
+ root.innerHTML=studioIntro('House Creator applications','All signed-in players can save private games without approval. Verified House Creators can publish eligible media without a separate review for each post.')+`<div class="table-scroller"><table><thead><tr><th>APPLICANT</th><th>DATE</th><th>STATUS</th><th>REVIEW</th></tr></thead><tbody>${(data||[]).map(x=>`<tr><td><strong>${escapeHTML(x.user_id.slice(0,8))}</strong><br><small>${escapeHTML(x.note||'No introduction')}</small></td><td>${new Date(x.created_at).toLocaleString()}</td><td>${escapeHTML(x.stage)}</td><td>${x.stage==='pending'?`<input data-app-evidence="${escapeHTML(x.id)}" type="text" maxlength="240" placeholder="Document / release verification reference" aria-label="Verified adult media documentation reference" style="max-width:180px;font-size:11px"> <button type="button" class="table-action" data-approve-app="${escapeHTML(x.id)}">Verify adult creator</button> <button class="table-action danger" data-decline-app="${escapeHTML(x.id)}">Decline</button>`:'Reviewed'}</td></tr>`).join('')||'<tr><td colspan="4">No applications yet</td></tr>'}</tbody></table></div>`;
+ root.querySelectorAll('[data-approve-app]').forEach(b=>b.onclick=async()=>{const evidence=root.querySelector('[data-app-evidence="'+b.dataset.approveApp+'"]')?.value?.trim()||'';if(evidence.length<8)return notify('Game-building accounts need no approval. Public adult media still needs a genuine completed verification reference.');const {error}=await supabase.rpc('lustsino_decide_creator',{p_application:b.dataset.approveApp,p_approve:true,p_evidence_ref:evidence.trim()});if(error)return notify(error.message);notify('House Creator verified.');renderStudioApplications(root)});
  root.querySelectorAll('[data-decline-app]').forEach(b=>b.onclick=async()=>{if(!confirm('Decline this application?'))return;const {error}=await supabase.rpc('lustsino_decide_creator',{p_application:b.dataset.declineApp,p_approve:false,p_evidence_ref:''});if(error)return notify(error.message);renderStudioApplications(root)});
 }
 
@@ -283,11 +283,13 @@ function renderStudioMedia(root,editId=null){
  const drawBunny=()=>{
   const out=$('#bunnyLibrary');
   out.innerHTML=bunnyEntries.length?'<table><thead><tr><th>FILE</th><th>SIZE</th><th>ACTION</th></tr></thead><tbody>'+
-   bunnyEntries.map((entry,i)=>'<tr><td style="max-width:360px;overflow-wrap:anywhere">'+escapeHTML(entry.key)+'</td><td>'+Math.round((entry.size||0)/1024)+' KB</td><td><button class="table-action" data-bunny-entry="'+i+'" '+(entry.url?'':'disabled title="Set Bunny CDN hostname first"')+'>Use file</button> <button class="table-action" data-bunny-test="'+i+'" '+(entry.url?'':'disabled')+'>Test CDN</button></td></tr>').join('')+
+   bunnyEntries.map((entry,i)=>'<tr><td style="max-width:360px;overflow-wrap:anywhere">'+escapeHTML(entry.key)+'</td><td>'+Math.round((entry.size||0)/1024)+' KB</td><td><button class="table-action" data-bunny-entry="'+i+'" '+''+'>Use file</button> <button class="table-action" data-bunny-test="'+i+'" '+''+'>Test CDN</button></td></tr>').join('')+
    '</tbody></table>':'<p>No Bunny objects found.</p>';
   out.querySelectorAll('[data-bunny-entry]').forEach(b=>b.onclick=()=>{
    const file=bunnyEntries[Number(b.dataset.bunnyEntry)];
    const form=$('#mediaForm');
+   if(!file?.url)return notify('No delivery URL for this object. Check that BUNNY_CDN_BASE_URL is your actual HTTPS Pull Zone hostname.');
+   if(!form)return notify('The media form is unavailable; reopen Studio → Media.');
    form.elements.name.value=file.key.split('/').pop().replace(/\.[^.]+$/,'').slice(0,80);
    form.elements.url.value=file.url;
    form.elements.type.value=/\.(mp4|webm)$/i.test(file.key)?'video':'image';
@@ -299,7 +301,7 @@ function renderStudioMedia(root,editId=null){
   out.querySelectorAll('[data-bunny-test]').forEach(btn=>btn.onclick=async()=>{
    const file=bunnyEntries[Number(btn.dataset.bunnyTest)];
    const status=$('#bunnyDeliveryStatus');
-   if(!file||!file.url||!status)return;
+   if(!file||!status)return;
    const {data:{session}}=await supabase.auth.getSession();
    if(!session){status.textContent='Master session expired. Please sign in again.';return;}
    btn.disabled=true;status.textContent='Testing Bunny CDN delivery for selected file…';
