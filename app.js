@@ -270,6 +270,45 @@ function renderStudioMedia(root,editId=null){
  <div class="mini-note"><b>Batch import:</b> The supplied 177-image archive is already added locally. For live Supabase uploads, sign in as an owner, enable an approved storage bucket, and use the batch upload option below.</div>
  <form id="batchUploadForm"><div class="form-grid"><div class="field span2"><label>Select approved media files (multiple)</label><input type="file" name="batch" multiple accept="image/jpeg,image/png,image/webp,video/mp4,video/webm" ${config.uploadsEnabled&&isAdmin?'':'disabled'}></div><div class="field"><label>Assign creator</label><select name="creator_id">${state.creators.map(c=>`<option value="${escapeHTML(c.id)}">${escapeHTML(c.name)}</option>`).join('')}</select></div><div class="field"><label>Rights reference for selected files</label><input name="rights_ref" placeholder="License / release ID"></div></div><button type="submit" class="button secondary" ${config.uploadsEnabled&&isAdmin?'':'disabled'}>Upload approved batch as drafts</button></form>
  `;
+ root.insertAdjacentHTML('afterbegin', '<section class="member-card" id="bunnyLibraryBlock"><div class="overline">BUNNY STORAGE</div><h3>Already-uploaded media</h3><p>Browse Bunny objects, select one, then assign its correct verified creator and rights reference below. Importing a file does not publish it.</p><div class="studio-actions"><button class="button secondary" id="bunnyListBtn" type="button">Browse Bunny files</button><button class="button subtle" id="bunnyMoreBtn" type="button" hidden>Load more</button></div><div id="bunnyLibrary" class="table-scroller"></div></section>');
+ let bunnyEntries=[],continuation=null;
+ const drawBunny=()=>{
+  const out=$('#bunnyLibrary');
+  out.innerHTML=bunnyEntries.length?'<table><thead><tr><th>FILE</th><th>SIZE</th><th>ACTION</th></tr></thead><tbody>'+
+   bunnyEntries.map((entry,i)=>'<tr><td style="max-width:360px;overflow-wrap:anywhere">'+escapeHTML(entry.key)+'</td><td>'+Math.round((entry.size||0)/1024)+' KB</td><td><button class="table-action" data-bunny-entry="'+i+'" '+(entry.url?'':'disabled title="Set Bunny CDN hostname first"')+'>Use file</button></td></tr>').join('')+
+   '</tbody></table>':'<p>No Bunny objects found.</p>';
+  out.querySelectorAll('[data-bunny-entry]').forEach(b=>b.onclick=()=>{
+   const file=bunnyEntries[Number(b.dataset.bunnyEntry)];
+   const form=$('#mediaForm');
+   form.elements.name.value=file.key.split('/').pop().replace(/\.[^.]+$/,'').slice(0,80);
+   form.elements.url.value=file.url;
+   form.elements.type.value=/\.(mp4|webm)$/i.test(file.key)?'video':'image';
+   form.elements.published.checked=false;
+   form.elements.age_verified.checked=false;
+   form.scrollIntoView({behavior:'smooth',block:'start'});
+   notify('File selected. Assign the creator, rights record, and approval status before saving.');
+  });
+  $('#bunnyMoreBtn').hidden=!continuation;
+ };
+ async function listBunny(append=false){
+  if(!supabase||!isAdmin)return notify('Master login required.');
+  const {data:{session}}=await supabase.auth.getSession();
+  if(!session)return notify('Sign in again.');
+  const target=window.VYRA_CONFIG?.uploadEndpoint;
+  const btn=$('#bunnyListBtn');btn.disabled=true;btn.textContent='Loading Bunny files…';
+  try{
+   const response=await fetch(target,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+session.access_token,apikey:config.supabaseAnonKey},body:JSON.stringify({action:'list',continuationToken:append?continuation:null})});
+   const result=await response.json().catch(()=>({}));
+   if(!response.ok)throw Error(result.error||'Bunny listing failed.');
+   bunnyEntries=append?bunnyEntries.concat(result.items||[]):result.items||[];
+   continuation=result.next||null;
+   drawBunny();
+   if(!result.deliveryReady)notify('Storage is connected but the Bunny Pull Zone hostname has not been configured. Files can be listed but not used in public pages.');
+  }catch(error){notify(error.message||'Could not load Bunny files.');}
+  finally{btn.disabled=false;btn.textContent='Browse Bunny files';}
+ }
+ $('#bunnyListBtn').onclick=()=>listBunny(false);
+ $('#bunnyMoreBtn').onclick=()=>listBunny(true);
  root.insertAdjacentHTML('beforeend',`<div class="mini-note"><b>Bulk attribution mapping</b><br>Download a CSV with your media IDs, enter each creator's handle and permission reference, then re-import. Works locally or with records already uploaded to Supabase.</div><div class="studio-actions"><button type="button" class="button secondary" id="exportMediaMap">↓ Download media mapping CSV</button><label class="button subtle">Choose mapping CSV <input id="mediaMapFile" type="file" accept=".csv,text/csv" style="max-width:180px"></label><button class="button primary" type="button" id="importMediaMap">Import mappings</button></div>`);
  $('#exportMediaMap').onclick=()=>{const quote=x=>'"'+String(x??'').replace(/"/g,'""')+'"';const rows=[['id','creator_handle','rights_ref','age_verified','published'].join(','),...state.media.map(m=>[m.id,creator(m.creator_id)?.handle||'',m.rights_ref||'',m.age_verified?'true':'false',m.published?'true':'false'].map(quote).join(','))];const blob=new Blob([rows.join('\n')],{type:'text/csv'}),u=URL.createObjectURL(blob),a=document.createElement('a');a.href=u;a.download='lustsino-media-mapping.csv';a.click();setTimeout(()=>URL.revokeObjectURL(u),1000)};
  $('#importMediaMap').onclick=async()=>{const file=$('#mediaMapFile').files[0];if(!file)return notify('Choose a mapping CSV.');const rows=parseCSV(await file.text());if(rows.length<2)return notify('No mapping rows found.');const h=rows.shift().map(v=>v.trim());if(!['id','creator_handle','rights_ref','age_verified','published'].every(v=>h.includes(v)))return notify('CSV missing required columns.');let updated=0,skipped=0;for(const vals of rows){const r=Object.fromEntries(h.map((key,i)=>[key,(vals[i]||'').trim()])),m=media(r.id),c=state.creators.find(x=>x.handle===r.creator_handle);if(!m||!c||!r.rights_ref){skipped++;continue}const ver=r.age_verified.toLowerCase()==='true',pub=r.published.toLowerCase()==='true';if(pub&&(!ver||!c.age_verified||!c.published||!c.url)){skipped++;continue}const patch={creator_id:c.id,rights_ref:r.rights_ref,age_verified:ver,published:pub};if(remote){if(!/^[0-9a-f]{8}-/i.test(m.id)){skipped++;continue}const {error}=await supabase.from('media_assets').update(patch).eq('id',m.id);if(error){skipped++;continue}}else{skipped++;continue}updated++;}if(remote)await refreshRemote();renderPublic();renderStudioMedia(root);notify(`Updated ${updated} assets; skipped ${skipped}.`)};
