@@ -159,7 +159,8 @@
   }
   function renderReel(){
    stopJobs();state.step='reel';state.rolls=0;state.paused=false;
-   const pace=Math.max(150,Math.min(650,Number(config.reelSpeedMs)||210));
+   const reduced=window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches||false;
+   const pace=reduced?1100:Math.max(180,Math.min(650,Number(config.reelSpeedMs)||210));
    state.root.innerHTML=controls(title('07 · FAST REEL','Watch, then hit Stop','Press the big button or the spacebar to capture your selection.')+
     '<div class="special-reel-window" id="specialReelWindow" aria-live="off"></div>'+
     '<p class="special-selection" id="specialReelCount">Reel running…</p>'+
