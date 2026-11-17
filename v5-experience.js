@@ -1,38 +1,105 @@
-/* LUSTSINO V8 animated center-card game lobby */
+/* LUSTSINO V9 — focused, visibly animated game showcase. */
 (()=>{'use strict';
 const $=s=>document.querySelector(s);
-const mq=window.matchMedia('(prefers-reduced-motion: reduce)');
-let index=0,hold=0,lastCount=0;
+const reduce=window.matchMedia('(prefers-reduced-motion: reduce)');
+const DURATION=4200;
+let current=0,nextAt=Date.now()+DURATION,autoplay=!reduce.matches;
+let touchStart=null,manualUntil=0,lastSignature='';
 const cards=()=>Array.from($('#featuredGames')?.querySelectorAll('.game-card')||[]);
-const wrap=(n,max)=>((n%max)+max)%max;
-function show(n){const els=cards(),N=els.length;if(!N)return;index=wrap(n,N);
- const w=els[0].offsetWidth||220,X=[0,.98,1.62,2.05],SC=[1.07,.8,.62,.5],OP=[1,.82,.4,0];
- els.forEach((el,i)=>{let d=wrap(i-index,N);if(d>Math.floor(N/2))d-=N;const depth=Math.min(Math.abs(d),3),side=Math.sign(d);
-  el.style.transform='translateX(calc(-50% + '+Math.round(X[depth]*w*side)+'px)) scale('+SC[depth]+') rotateY('+(-side*Math.min(depth,2)*16)+'deg)';
-  el.style.opacity=OP[depth];el.style.zIndex=String(20-depth);el.style.pointerEvents=depth>2?'none':'auto';
-  el.classList.toggle('feature-active',d===0);el.setAttribute('aria-current',String(d===0));
+const wrap=(n,total)=>((n%total)+total)%total;
+function layout(n,resetClock=true){
+ const slides=cards(),total=slides.length,stage=$('#featuredGames');
+ if(!stage||!total)return;
+ current=wrap(n,total);
+ const width=slides[0].offsetWidth||220;
+ const mobile=stage.clientWidth<580;
+ const distances=mobile?[0,.78,1.38,1.8]:[0,.93,1.59,2.04];
+ const scales=[1.09,.77,.58,.46];
+ const opacity=[1,.72,.32,0];
+ slides.forEach((slide,i)=>{
+  let signed=wrap(i-current,total);if(signed>Math.floor(total/2))signed-=total;
+  const depth=Math.min(Math.abs(signed),3),side=Math.sign(signed);
+  const offset=Math.round(distances[depth]*width*side);
+  slide.style.transform='translate3d(calc(-50% + '+offset+'px),'+(depth*15)+'px,0) rotateY('+(-side*Math.min(depth,2)*18)+'deg) scale('+scales[depth]+')';
+  slide.style.opacity=String(opacity[depth]);slide.style.zIndex=String(50-depth);
+  slide.style.pointerEvents=depth>2?'none':'auto';
+  slide.classList.toggle('feature-active',signed===0);
+  slide.setAttribute('aria-current',String(signed===0));
+  slide.setAttribute('aria-hidden',String(depth>2));
  });
- const active=els[index],h=active.querySelector('h3')?.textContent||'',p=active.querySelector('p')?.textContent||'';
- const src=active.querySelector('.game-cover-image')?.getAttribute('src')||'';
- const cover=$('#spotlightCover');if(cover){cover.style.backgroundImage='linear-gradient(90deg,#160a1699,#160a1655),url("'+src.replace(/["\\]/g,'')+'")';cover.classList.remove('spotlight-flash');void cover.offsetWidth;cover.classList.add('spotlight-flash')}
- if($('#spotlightTitle'))$('#spotlightTitle').textContent=h;
- if($('#spotlightDescription'))$('#spotlightDescription').textContent=p;
- if($('#spotlightPosition'))$('#spotlightPosition').textContent=String(index+1).padStart(2,'0')+' / '+String(N).padStart(2,'0');
- const play=$('#spotlightPlay');if(play){delete play.dataset.start;delete play.dataset.route;if(active.dataset.start){play.dataset.start=active.dataset.start;play.textContent='Play this game ↗'}else{play.dataset.route='games';play.textContent='Explore this mode ↗'}}
- const dots=$('#featureDots');if(dots)dots.innerHTML=els.map((_,i)=>'<button class="feature-dot '+(index===i?'on':'')+'" data-index="'+i+'" aria-label="Show game '+(i+1)+'" aria-current="'+(i===index)+'"></button>').join('');
+ stage.classList.add('lobby-initialized');
+ const active=slides[current];
+ const title=active.querySelector('h3')?.textContent||'';
+ const description=active.querySelector('p')?.textContent||'';
+ const photo=active.querySelector('.game-cover-image')?.getAttribute('src')||'';
+ const cover=$('#spotlightCover');
+ if(cover){
+  cover.style.backgroundImage='linear-gradient(95deg,#190915a3,#19091536),url("'+photo.replace(/["\\]/g,'')+'")';
+  cover.classList.remove('spotlight-flash');void cover.offsetWidth;cover.classList.add('spotlight-flash');
+ }
+ if($('#spotlightTitle'))$('#spotlightTitle').textContent=title;
+ if($('#spotlightDescription'))$('#spotlightDescription').textContent=description;
+ if($('#spotlightPosition'))$('#spotlightPosition').textContent=String(current+1).padStart(2,'0')+' / '+String(total).padStart(2,'0');
+ const button=$('#spotlightPlay');
+ if(button){
+  delete button.dataset.start;delete button.dataset.route;
+  if(active.dataset.start){button.dataset.start=active.dataset.start;button.textContent='Play game ↗'}
+  else{button.dataset.route='games';button.textContent='Explore this game ↗'}
+ }
+ const dots=$('#featureDots');
+ if(dots)dots.innerHTML=slides.map((_,i)=>'<button class="feature-dot '+(i===current?'on':'')+'" aria-label="Show game '+(i+1)+'" data-index="'+i+'" aria-current="'+(i===current)+'"></button>').join('');
+ if(resetClock){nextAt=Date.now()+DURATION;restartProgress()}
 }
-function start(){const el=$('#featuredGames');if(!el)return;
- const obs=new MutationObserver(()=>{if(cards().length!==lastCount){lastCount=cards().length;index=0}show(index)});obs.observe(el,{childList:true});
- const nav=n=>{hold=Date.now()+7500;show(n)};
- $('#gamesBack')?.addEventListener('click',()=>nav(index-1));$('#gamesForward')?.addEventListener('click',()=>nav(index+1));
- $('#featureDots')?.addEventListener('click',event=>{const b=event.target.closest('[data-index]');if(b)nav(Number(b.dataset.index))});
- el.addEventListener('click',event=>{const c=event.target.closest('.game-card');if(!c)return;const i=cards().indexOf(c);if(i!==index){event.preventDefault();event.stopPropagation();nav(i)}},true);
- let sx=null;el.addEventListener('pointerdown',event=>{sx=event.clientX;hold=Date.now()+7500});
- el.addEventListener('pointerup',event=>{if(sx===null)return;const dx=event.clientX-sx;sx=null;if(Math.abs(dx)>45)nav(index+(dx<0?1:-1))});
- el.addEventListener('pointerenter',()=>hold=Date.now()+5500);el.addEventListener('focusin',()=>hold=Date.now()+5500);
- $('#featureSpotlight')?.addEventListener('pointerenter',()=>hold=Date.now()+5000);
- window.addEventListener('resize',()=>show(index));show(0);
- setInterval(()=>{if(document.hidden||mq.matches||Date.now()<hold||!$('#view-home')?.classList.contains('show'))return;if(cards().length>1)show(index+1)},4800);
+function restartProgress(){
+ const bar=$('#lobbyProgressBar'),toggle=$('#lobbyAuto');
+ if(toggle){toggle.textContent=autoplay?'Ⅱ Pause slides':'▶ Play slides';toggle.setAttribute('aria-pressed',String(autoplay))}
+ if(bar){
+  bar.style.animation='none';void bar.offsetWidth;
+  bar.style.animation=autoplay?'lobbyCountdown '+DURATION+'ms linear forwards':'none';
+  bar.style.transform=autoplay?'':'scaleX(0)';
+ }
+}
+function navigate(n){
+ manualUntil=Date.now()+1700;
+ layout(n,true);
+}
+function sync(){
+ const list=cards();
+ const sig=list.map(el=>el.getAttribute('data-start')||el.textContent.slice(0,30)).join('|');
+ if(sig!==lastSignature){lastSignature=sig;current=Math.min(current,Math.max(0,list.length-1));layout(current,true)}
+}
+function start(){
+ const stage=$('#featuredGames');
+ if(!stage)return;
+ const observer=new MutationObserver(sync);
+ observer.observe(stage,{childList:true});
+ $('#gamesBack')?.addEventListener('click',()=>navigate(current-1));
+ $('#gamesForward')?.addEventListener('click',()=>navigate(current+1));
+ $('#featureDots')?.addEventListener('click',e=>{const t=e.target.closest('[data-index]');if(t)navigate(Number(t.dataset.index))});
+ $('#lobbyAuto')?.addEventListener('click',()=>{autoplay=!autoplay;nextAt=Date.now()+DURATION;restartProgress()});
+ stage.addEventListener('pointerdown',e=>{touchStart=e.clientX},{passive:true});
+ stage.addEventListener('pointerup',e=>{
+  if(touchStart===null)return;const dx=e.clientX-touchStart;touchStart=null;
+  if(Math.abs(dx)>38){e.preventDefault();navigate(current+(dx<0?1:-1))}
+ });
+ stage.addEventListener('click',e=>{
+  const slide=e.target.closest('.game-card');if(!slide)return;
+  const i=cards().indexOf(slide);
+  if(i>=0&&i!==current){e.preventDefault();e.stopImmediatePropagation();navigate(i)}
+ },true);
+ stage.addEventListener('keydown',e=>{
+  if(e.key==='ArrowLeft'){e.preventDefault();navigate(current-1)}
+  if(e.key==='ArrowRight'){e.preventDefault();navigate(current+1)}
+ });
+ window.addEventListener('resize',()=>layout(current,false));
+ document.addEventListener('visibilitychange',()=>{nextAt=Date.now()+DURATION;restartProgress()});
+ reduce.addEventListener?.('change',e=>{if(e.matches)autoplay=false;restartProgress()});
+ sync();
+ setInterval(()=>{
+  if(!autoplay||document.hidden||!$('#view-home')?.classList.contains('show'))return;
+  if(Date.now()<manualUntil)return;
+  if(Date.now()>=nextAt&&cards().length>1){layout(current+1,true)}
+ },200);
 }
 function music(){const el=$('#ambientMusic'),button=$('#musicToggle');if(!el||!button)return;const key='lustsino_volume_v7',mute='lustsino_music_muted_v7',volume=Number(localStorage.getItem(key));el.volume=Number.isFinite(volume)&&volume>0&&volume<=1?volume:.34;
  let muted=localStorage.getItem(mute)==='yes';el.muted=muted;
