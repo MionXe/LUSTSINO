@@ -278,7 +278,7 @@ function renderStudioMedia(root,editId=null){
  <div class="mini-note"><b>Batch import:</b> The supplied 177-image archive is already added locally. For live Supabase uploads, sign in as an owner, enable an approved storage bucket, and use the batch upload option below.</div>
  <form id="batchUploadForm"><div class="form-grid"><div class="field span2"><label>Select approved media files (multiple)</label><input type="file" name="batch" multiple accept="image/jpeg,image/png,image/webp,video/mp4,video/webm" ${config.uploadsEnabled&&isAdmin?'':'disabled'}></div><div class="field"><label>Assign creator</label><select name="creator_id">${state.creators.map(c=>`<option value="${escapeHTML(c.id)}">${escapeHTML(c.name)}</option>`).join('')}</select></div><div class="field"><label>Rights reference for selected files</label><input name="rights_ref" placeholder="License / release ID"></div></div><button type="submit" class="button secondary" ${config.uploadsEnabled&&isAdmin?'':'disabled'}>Upload approved batch as drafts</button></form>
  `;
- root.insertAdjacentHTML('afterbegin', '<section class="member-card" id="bunnyLibraryBlock"><div class="overline">BUNNY STORAGE</div><h3>Already-uploaded media</h3><p>Browse Bunny objects, select one, then assign its correct verified creator and rights reference below. Importing a file does not publish it.</p><div class="studio-actions"><button class="button secondary" id="bunnyListBtn" type="button">Browse Bunny files</button><button class="button subtle" id="bunnyMoreBtn" type="button" hidden>Load more</button></div><div id="bunnyLibrary" class="table-scroller"></div></section>');
+ root.insertAdjacentHTML('afterbegin', '<section class="member-card" id="bunnyLibraryBlock"><div class="overline">BUNNY STORAGE</div><h3>Already-uploaded media</h3><p>Browse Bunny objects, select one, then assign its correct verified creator and rights reference below. Importing a file does not publish it.</p><div class="studio-actions"><button class="button secondary" id="bunnyListBtn" type="button">Browse Bunny files</button><button class="button subtle" id="bunnyHealthBtn" type="button">Test Bunny connection</button><button class="button subtle" id="bunnyMoreBtn" type="button" hidden>Load more</button></div><p id="bunnyHealthStatus" class="mini-note" role="status">Select “Test Bunny connection” to validate storage and CDN configuration.</p><div id="bunnyLibrary" class="table-scroller"></div></section>');
  let bunnyEntries=[],continuation=null;
  const drawBunny=()=>{
   const out=$('#bunnyLibrary');
@@ -315,6 +315,33 @@ function renderStudioMedia(root,editId=null){
   }catch(error){notify(error.message||'Could not load Bunny files.');}
   finally{btn.disabled=false;btn.textContent='Browse Bunny files';}
  }
+ $('#bunnyHealthBtn').onclick=async()=>{
+  const status=$('#bunnyHealthStatus'),btn=$('#bunnyHealthBtn');
+  if(!supabase||!isAdmin){status.textContent='Master access is required.';return;}
+  const {data:{session}}=await supabase.auth.getSession();
+  if(!session){status.textContent='Sign in again to test the Bunny gateway.';return;}
+  btn.disabled=true;status.textContent='Testing signed-in gateway and Bunny storage…';
+  const invoke=async action=>{
+    const res=await fetch(window.VYRA_CONFIG.uploadEndpoint,{
+      method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+session.access_token,apikey:config.supabaseAnonKey},
+      body:JSON.stringify({action})
+    });
+    const data=await res.json().catch(()=>({}));
+    if(!res.ok)throw Error(data.error||('Gateway returned HTTP '+res.status));
+    return data;
+  };
+  try{
+    const health=await invoke('health');
+    if(!health.ready){
+      const missing=[!health.storageConfigured?'S3 credentials':'',!health.deliveryConfigured?'CDN hostname':''].filter(Boolean);
+      status.textContent='Gateway reachable, but configuration is incomplete: '+missing.join(' and ')+'.';
+    }else{
+      const result=await invoke('list');
+      status.textContent='Bunny S3 connection successful. '+(result.items||[]).length+' objects returned in the first batch. CDN hostname configured; test actual file delivery before publishing.';
+    }
+  }catch(error){status.textContent='Bunny test failed: '+(error.message||String(error));}
+  finally{btn.disabled=false;}
+ };
  $('#bunnyListBtn').onclick=()=>listBunny(false);
  $('#bunnyMoreBtn').onclick=()=>listBunny(true);
  root.insertAdjacentHTML('beforeend',`<div class="mini-note"><b>Bulk attribution mapping</b><br>Download a CSV with your media IDs, enter each creator's handle and permission reference, then re-import. Works locally or with records already uploaded to Supabase.</div><div class="studio-actions"><button type="button" class="button secondary" id="exportMediaMap">↓ Download media mapping CSV</button><label class="button subtle">Choose mapping CSV <input id="mediaMapFile" type="file" accept=".csv,text/csv" style="max-width:180px"></label><button class="button primary" type="button" id="importMediaMap">Import mappings</button></div>`);
