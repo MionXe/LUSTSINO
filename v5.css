@@ -33,3 +33,13 @@
 @keyframes spotlightZoom{from{background-size:100% auto;filter:saturate(.95)}to{background-size:113% auto;filter:saturate(1.13)}}
 @media(max-width:700px){#featuredGames.carousel-game-grid>.game-card{flex:0 0 min(75vw,270px);width:min(75vw,270px)}}
 @media(prefers-reduced-motion:reduce){#featureSpotlight,#spotlightCover{animation:none!important}}
+
+/* V8 animated game lobby. A 3D card stage, not a horizontal scroller. */
+#featuredGames.carousel-game-grid{display:block!important;position:relative!important;height:clamp(270px,42vw,420px)!important;min-height:270px;overflow:hidden;perspective:1100px;touch-action:pan-y;isolation:isolate;scroll-snap-type:none}
+#featuredGames.carousel-game-grid .game-card{position:absolute!important;left:50%!important;top:5%!important;width:clamp(160px,25vw,250px)!important;max-width:none!important;margin-left:0!important;transform-origin:center center;transition:transform .8s cubic-bezier(.22,.9,.25,1),opacity .8s,filter .6s!important;filter:brightness(.58) saturate(.82);will-change:transform,opacity;box-shadow:0 20px 45px #0009}
+#featuredGames.carousel-game-grid .game-card.feature-active{filter:brightness(1) saturate(1.1);box-shadow:0 0 0 2px #e7c46a,0 15px 50px #000b,0 0 35px #9d456a66}
+#featuredGames.carousel-game-grid .game-card.feature-active:before{content:"";position:absolute;inset:-4px;border-radius:inherit;pointer-events:none;border:2px solid #e7c46a;box-shadow:0 0 18px #e7c46a77;animation:lobby-glow 2s ease-in-out infinite}
+@keyframes lobby-glow{50%{box-shadow:0 0 34px #e7c46aaa}}
+.master-only[hidden]{display:none!important}
+@media(max-width:640px){#featuredGames.carousel-game-grid{height:305px!important}#featuredGames.carousel-game-grid .game-card{width:175px!important;top:14px!important}.feature-spotlight{min-width:0!important}.spotlight-copy{min-width:0!important}.spotlight-copy h3{overflow-wrap:anywhere}.header-actions{min-width:0;flex-wrap:wrap}.studio-grid,.account-columns{min-width:0;grid-template-columns:minmax(0,1fr)!important}.studio-panel,.member-panel,.page-wrap{min-width:0;max-width:100%}.member-card{min-width:0;overflow-wrap:anywhere}input,select,textarea{max-width:100%}.footer-links{flex-wrap:wrap}}
+@media(prefers-reduced-motion:reduce){#featuredGames.carousel-game-grid .game-card{transition:none!important}}
