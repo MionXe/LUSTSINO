@@ -224,12 +224,26 @@ function studioIntro(title,description){return `<div><h2>${title}</h2><p>${descr
 function renderStudio(){const status=$('#studioStatus');if(status)status.textContent=isAdmin?'HOUSE MASTER · SECURE DASHBOARD':'Dashboard unavailable';$('#studioAuthButton').textContent=isAdmin?'Sign out':'Admin sign in';if(!remote){$('#studioContent').innerHTML='<div class="member-card"><h2>Live connection required</h2><p>Studio uses live Supabase records only. Check your internet connection, then reload.</p></div>';return;}if(remote&&!isAdmin){$('#studioContent').innerHTML=`${studioIntro('Owner sign-in required','Visitors do not need accounts. Your admin tools are protected by Supabase Auth and row-level security.')}<div class="mini-note">Guests can browse published games without signing in. To publish, sign in with an authorized Master account.</div><button class="button primary" id="loginFromStudio">Sign in to studio ↗</button>`;$('#loginFromStudio').onclick=authModal;return}
 $$('[data-studio-tab]').forEach(e=>e.classList.toggle('active',e.dataset.studioTab===state.studioTab));const root=$('#studioContent');switch(state.studioTab){case'overview':renderStudioOverview(root);break;case'creators':renderStudioCreators(root);break;case'applications':renderStudioApplications(root);break;case'media':renderStudioMedia(root);break;case'experiences':renderStudioGames(root);break;case'reports':renderStudioReports(root);break;case'settings':renderStudioSettings(root);break;}}
 async function renderStudioReports(root){
- root.innerHTML=studioIntro('Content reports','Only authenticated allowlisted owners can view and process reports.')+'<p class="muted">Loading reports...</p>';
- if(!remote||!supabase){root.innerHTML=studioIntro('Content reports','Reporting is a backend feature. Install the SQL schema and connect Supabase to receive reports.');return}
- if(!isAdmin){root.innerHTML='<p>Owner sign-in required.</p>';return}
- const {data,error}=await supabase.from('content_reports').select('id,reason,details,media_id,experience_id,created_at').order('created_at',{ascending:false}).limit(100);
- if(error){root.innerHTML='<p>'+escapeHTML(error.message)+'</p>';return}
- root.innerHTML=studioIntro('Content reports','Review content concerns. Investigate and remove infringing or unsafe media promptly.')+`<div class="table-scroller"><table><thead><tr><th>REASON</th><th>CONTENT ID</th><th>DETAILS</th><th>DATE</th></tr></thead><tbody>${(data||[]).map(r=>`<tr><td>${escapeHTML(r.reason)}</td><td>${escapeHTML(r.media_id||r.experience_id||'—')}</td><td>${escapeHTML(r.details||'—')}</td><td>${escapeHTML(new Date(r.created_at).toLocaleString())}</td></tr>`).join('')||'<tr><td colspan="4">No reports yet</td></tr>'}</tbody></table></div>`;
+ root.innerHTML=studioIntro('Content reports','Review and act on reported posts, media and games.')+'<p class="muted">Loading reports…</p>';
+ if(!remote||!supabase||!isAdmin){root.innerHTML='<p>Master account required.</p>';return;}
+ const {data,error}=await supabase.from('content_reports')
+  .select('id,reason,details,post_id,media_id,experience_id,created_at')
+  .order('created_at',{ascending:false}).limit(100);
+ if(error){root.innerHTML='<p>'+escapeHTML(error.message)+'</p>';return;}
+ root.innerHTML=studioIntro('Content reports','Review complaints and remove content that infringes rights, privacy or consent.')+
+ '<div class="table-scroller"><table><thead><tr><th>REASON</th><th>CONTENT ID</th><th>DETAILS</th><th>DATE</th><th>ACTION</th></tr></thead><tbody>'+
+ ((data||[]).map(report=>'<tr><td>'+escapeHTML(report.reason)+'</td><td>'+
+ escapeHTML(report.post_id||report.media_id||report.experience_id||'—')+'</td><td>'+
+ escapeHTML(report.details||'—')+'</td><td>'+new Date(report.created_at).toLocaleString()+'</td><td>'+
+ (report.post_id?'<button class="table-action danger" data-unpublish-report="'+escapeHTML(report.post_id)+'" type="button">Remove post from feed</button>':'—')+
+ '</td></tr>').join('')||'<tr><td colspan="5">No reports yet</td></tr>')+'</tbody></table></div>';
+ root.querySelectorAll('[data-unpublish-report]').forEach(button=>button.onclick=async()=>{
+  if(!confirm('Remove this reported post from public view?'))return;
+  button.disabled=true;
+  const {error}=await supabase.from('community_posts').update({published:false,review_status:'rejected'}).eq('id',button.dataset.unpublishReport);
+  if(error){button.disabled=false;return notify(error.message);}
+  notify('Reported post removed from the public feed.');renderStudioReports(root);
+ });
 }
 function renderStudioOverview(root){root.innerHTML=`${studioIntro('Overview','Content inventory and experience management.')}
 <div class="studio-stats"><div class="studio-stat"><b>${state.experiences.length}</b><small>INTERACTIVE GAMES</small></div><div class="studio-stat"><b>${state.creators.length}</b><small>CREATOR PROFILES</small></div><div class="studio-stat"><b>${state.media.length}</b><small>MEDIA RECORDS</small></div></div>
