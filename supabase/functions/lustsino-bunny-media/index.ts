@@ -104,6 +104,28 @@ Deno.serve(async (request:Request) => {
       return response(origin,{uploadId:id,status:"uploaded",objectKey:record.object_key,
         url,deliveryReady:!!url});
     }
+    if(action==="cdn-check"){
+      if(!admin)return response(origin,{error:"Master access required"},403);
+      const key=String(payload?.key||"");
+      if(key.length<1 || key.length>400 || key.startsWith("/") || key.includes("..") || /[\\\r\n\u0000]/.test(key))
+        return response(origin,{error:"Invalid Bunny object path"},400);
+      if(!cdnBase)return response(origin,{error:"Bunny CDN Pull Zone is not configured"},503);
+      const object=await client.send(new HeadObjectCommand({Bucket:bucket,Key:key}));
+      const url=safeUrl(key);
+      if(!url)return response(origin,{error:"No valid CDN hostname"},503);
+      let cdnStatus=0, cdnType="",cdnLength=0;
+      try {
+        const head=await fetch(url,{method:"HEAD",redirect:"manual",signal:AbortSignal.timeout(12000)});
+        cdnStatus=head.status;cdnType=head.headers.get("content-type")||"";
+        cdnLength=Number(head.headers.get("content-length")||"0");
+      }catch{
+        return response(origin,{cdnReachable:false,storageReachable:true,cdnStatus:0,
+          error:"CDN could not be reached from the server",storageBytes:Number(object.ContentLength)||0});
+      }
+      return response(origin,{cdnReachable:cdnStatus>=200 && cdnStatus<300,storageReachable:true,
+        cdnStatus,cdnContentType:cdnType,cdnBytes:cdnLength,storageBytes:Number(object.ContentLength)||0,
+        storageContentType:object.ContentType||"",deliveryUrl:url});
+    }
     if(action==="list"){
       if(!admin)return response(origin,{error:"Master access required"},403);
       const rawPrefix=String(payload?.prefix||"").trim();
