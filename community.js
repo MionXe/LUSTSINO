@@ -18,15 +18,15 @@ function init(){
  if(!localStorage.getItem('lustsino_consent_'+policyVersion))gate?.classList.remove('hidden');
  if(check&&accept){accept.disabled=true;check.addEventListener('change',()=>accept.disabled=!check.checked);accept.addEventListener('click',()=>{if(!check.checked)return;localStorage.setItem('lustsino_consent_'+policyVersion,new Date().toISOString());sessionStorage.setItem('lustsino_pending_terms','yes')})}
  $all('[data-route="account"]').forEach(b=>b.addEventListener('click',()=>setTimeout(renderAccount,30)));
- $all('[data-route="feed"]').forEach(b=>b.addEventListener('click',()=>setTimeout(loadFeed,20)));
+ // Delegated feed navigation also handles dynamically rendered creator cards.
  $all('[data-route="leaderboard"]').forEach(b=>b.addEventListener('click',()=>setTimeout(loadLeaderboard,20)));
  $all('[data-route="search"]').forEach(b=>b.addEventListener('click',()=>setTimeout(renderSearch,20)));
- document.addEventListener('click',e=>{const r=e.target.closest('[data-route="community"]');if(r)setTimeout(renderCommunity,20)});
+ document.addEventListener('click',e=>{const f=e.target.closest('[data-route="feed"]');if(f)setTimeout(loadFeed,20);const r=e.target.closest('[data-route="community"]');if(r)setTimeout(renderCommunity,20)});
  const search=$('#communitySearch');search?.addEventListener('input',renderSearch);
  newGame.nodes=[initNode(0),initNode(1),{round:3,title:'Final reveal',subtitle:'Your surprise',mediaId:'',seconds:15,spots:[]}];
  setTimeout(ready,500);
 }
-let attempts=0;async function ready(){if(!db()){if(++attempts<24)setTimeout(ready,1200);return}const client=db();client.auth.onAuthStateChange((event)=>{setTimeout(loadIdentity,100);if(event==='PASSWORD_RECOVERY')setTimeout(showPasswordRecovery,250)});await loadIdentity();}
+let attempts=0;async function ready(){if(!db()){if(++attempts<24)setTimeout(ready,1200);return}const client=db();client.auth.onAuthStateChange((event)=>{setTimeout(loadIdentity,100);if(event==='PASSWORD_RECOVERY')setTimeout(showPasswordRecovery,250)});await loadIdentity();if(core()?.state?.route==='feed')await loadFeed();}
 async function loadIdentity(){const client=db();if(!client)return;const {data:{user},error}=await client.auth.getUser();viewer=error?null:user;profile=null;if(viewer){const {data:p}=await client.from('member_profiles').select('*').eq('user_id',viewer.id).maybeSingle();profile=p;if(p&&sessionStorage.getItem('lustsino_pending_terms')==='yes'){const {error:termsError}=await client.rpc('accept_lustsino_terms',{p_version:policyVersion});if(!termsError){sessionStorage.removeItem('lustsino_pending_terms');profile={...p,terms_version:policyVersion}}}}
  if(core()?.state?.route==='account')renderAccount();if(core()?.state?.route==='community')renderCommunity();}
 
