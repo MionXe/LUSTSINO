@@ -135,7 +135,7 @@ function renderPostTool(){const root=$('#memberToolBody');root.innerHTML=`<div c
    media_url,source_url,
    creator_credit:String(fd.get('creator_credit')).trim(),
    rights_reference:String(fd.get('rights_reference')).trim(),
-   tags:cleanTags(fd.get('tags')),published:instant,review_status:instant?'approved':'pending'
+   tags:cleanTags(fd.get('tags')),published:instant,review_status:instant?'approved':'draft'
   };
   const {error}=await db().from('community_posts').insert(row);
   if(error){
@@ -159,7 +159,26 @@ function renderMemberEditor(approved){const root=$('#memberGameEditor');if(!root
  $all('.member-hotspot',canvas).forEach(b=>{let drag=false;b.onpointerdown=e=>{e.preventDefault();drag=true;b.setPointerCapture(e.pointerId)};b.onpointermove=e=>{if(!drag)return;const r=canvas.getBoundingClientRect(),s=node.spots[Number(b.dataset.index)];s.x=Math.max(0,Math.min(100,Math.round((e.clientX-r.left)/r.width*100)));s.y=Math.max(0,Math.min(100,Math.round((e.clientY-r.top)/r.height*100)));b.style.left=s.x+'%';b.style.top=s.y+'%'};b.onpointerup=()=>{drag=false}});
  $all('[data-label]',root).forEach(el=>el.onchange=e=>{node.spots[Number(el.dataset.label)].label=e.target.value;renderMemberEditor(approved)});$all('[data-shape]',root).forEach(el=>el.onchange=e=>{node.spots[Number(el.dataset.shape)].shape=e.target.value;renderMemberEditor(approved)});$all('[data-width]',root).forEach(el=>el.onchange=e=>{node.spots[Number(el.dataset.width)].w=Number(e.target.value);renderMemberEditor(approved)});$all('[data-height]',root).forEach(el=>el.onchange=e=>{node.spots[Number(el.dataset.height)].h=Number(e.target.value);renderMemberEditor(approved)});$all('[data-remove-hotspot]',root).forEach(el=>el.onclick=()=>{node.spots.splice(Number(el.dataset.removeHotspot),1);renderMemberEditor(approved)})
 }
-async function renderMyDrafts(){const root=$('#memberToolBody');root.innerHTML='<p>Loading your submissions…</p>';const [posts,games]=await Promise.all([db().from('community_posts').select('id,title,review_status,published').eq('owner_id',viewer.id).order('created_at',{ascending:false}).limit(50),db().from('experiences').select('id,title,review_status,published').eq('author_id',viewer.id).order('created_at',{ascending:false}).limit(50)]);root.innerHTML=`<div class="member-card"><h2>Your submissions</h2><h3>Games</h3>${(games.data||[]).map(g=>`<div class="draft-row"><span>${esc(g.title)}</span><small>${esc(g.review_status)}</small></div>`).join('')||'<p>No games yet</p>'}<h3>Media</h3>${(posts.data||[]).map(g=>`<div class="draft-row"><span>${esc(g.title)}</span><small>${esc(g.review_status)}</small></div>`).join('')||'<p>No posts yet</p>'}</div>`}
+async function renderMyDrafts(){
+ const root=$('#memberToolBody');
+ root.innerHTML='<p>Loading your saved content…</p>';
+ const [posts,games]=await Promise.all([
+  db().from('community_posts').select('id,title,review_status,published').eq('owner_id',viewer.id).order('created_at',{ascending:false}).limit(50),
+  db().from('experiences').select('id,title,review_status,published').eq('author_id',viewer.id).order('created_at',{ascending:false}).limit(50)
+ ]);
+ const canPublish=profile?.creator_status==='verified'||!!core()?.admin;
+ const gameRows=(games.data||[]).map(g=>'<div class="draft-row"><span>'+esc(g.title)+'</span><small>'+(g.published?'Live':'Saved draft')+'</small></div>').join('');
+ const postRows=(posts.data||[]).map(p=>'<div class="draft-row"><span>'+esc(p.title)+'</span><small>'+(p.published?'Live':'Saved draft')+'</small>'+
+  (canPublish&&!p.published?'<button type="button" class="button secondary smallish" data-publish-post="'+esc(p.id)+'">Publish</button>':'')+'</div>').join('');
+ root.innerHTML='<div class="member-card"><h2>Your creations</h2><p>Your drafts stay private. Once verified, completed Bunny uploads can go live immediately without another review.</p><h3>Games</h3>'+
+  (gameRows||'<p>No games yet.</p>')+'<h3>Media posts</h3>'+(postRows||'<p>No posts yet.</p>')+'</div>';
+ $all('[data-publish-post]',root).forEach(btn=>btn.onclick=async()=>{
+  btn.disabled=true;
+  const {error}=await db().from('community_posts').update({published:true,review_status:'approved'}).eq('id',btn.dataset.publishPost).eq('owner_id',viewer.id);
+  if(error){btn.disabled=false;return msg('Cannot publish this draft: '+error.message+'. Confirm it is your completed Bunny upload, with the same rights reference and verified House Creator access.');}
+  msg('Post published.');renderMyDrafts();
+ });
+}
 async function renderReviewTool(){
  const root=$('#memberToolBody');if(!core()?.admin)return root.innerHTML='<p>LUSTSINO Master access required. Sign in through Studio first.</p>';
  root.innerHTML='<p>Loading moderation queue…</p>';
