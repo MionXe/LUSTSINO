@@ -436,6 +436,33 @@ function renderChoiceDesigner(place){
  $('#fillChoices').onclick=()=>{if(!state.media.length)return notify('Add media to the vault first.');const howMany=Math.min(type==='wheel'?24:type==='cards'?48:48,state.media.length);const chosen=drawMedia(howMany);entries.length=0;for(let i=0;i<howMany;i++){const m=media(chosen[i]);entries.push({label:`Feature ${i+1}`,symbol:'♥',mediaId:m.id,creatorId:m.creator_id,seconds:15})}write();renderDesigner();notify('Result pool populated — review before publishing.')};
 }
 let activeDesignerNode='';let activeDesignerSpot=0;
+function renderSpecialDesigner(place){
+ let cfg;
+ try{cfg=JSON.parse($('#gameJSON').value)}catch{place.innerHTML='<p>Fix your configuration JSON first.</p>';return;}
+ const lines=(cfg.tagCards||[]).map(c=>(c.label||'')+':'+(c.tag||'')).join('\n');
+ const voice=cfg.voice||{};
+ const labels=[['welcome','Welcome narration'],['shuffle','Shuffle narration'],['reel','Reel narration'],['gallery','Gallery narration'],['finish','Final narration']];
+ place.innerHTML='<section class="designer-section"><div class="overline">SPECIAL · VISUAL BUILDER</div><h3>Edit the memory game</h3>'+
+  '<p>Enter 4–10 labeled category cards, one per line, using <code>Title:tag</code>. Each tag draws only public approved feed posts. Creators add the matching tags when uploading media.</p>'+
+  '<label>Theme cards (one per line)<textarea rows="8" id="specialCardLines" spellcheck="false">'+escapeHTML(lines)+'</textarea></label>'+
+  '<label>Reel speed<select id="specialSpeed">'+[180,210,260,350,500].map(v=>'<option value="'+v+'" '+((cfg.reelSpeedMs||210)===v?'selected':'')+'>'+v+' milliseconds per item</option>').join('')+'</select></label>'+
+  '<p>Optional MP3 voice clips: upload them to an approved media host, then paste the HTTPS audio URLs below. Leave blank for silent prompts.</p>'+
+  labels.map(([key,label])=>'<label>'+label+'<input type="url" data-special-voice="'+key+'" value="'+escapeHTML(voice[key]||'')+'" placeholder="https://.../narration.mp3"></label>').join('')+
+  '<div class="studio-actions"><button class="button secondary" type="button" id="saveSpecialSettings">Apply settings to game</button></div></section>';
+ $('#saveSpecialSettings').onclick=()=>{
+  const parsed=String($('#specialCardLines').value).split(/\r?\n/).map(x=>x.trim()).filter(Boolean)
+   .map(line=>{const p=line.lastIndexOf(':');return{label:line.slice(0,p).trim(),tag:line.slice(p+1).trim().toLowerCase()}})
+   .filter(item=>item.label&&/^[a-z0-9_-]{2,35}$/.test(item.tag)&&item.label.length<=36);
+  if(parsed.length<4||parsed.length>10)return notify('Please enter 4–10 cards, using Title:tag.');
+  const audio={};
+  $('[data-special-voice]',place).forEach(field=>{const value=String(field.value||'').trim();if(value&&!safeURL(value))return;audio[field.dataset.specialVoice]=safeURL(value)||''});
+  cfg.tagCards=parsed;cfg.reelSpeedMs=Number($('#specialSpeed').value)||210;cfg.voice=audio;
+  cfg.lockMediaAssignments=true;cfg.rotateMedia=false;
+  $('#gameJSON').value=JSON.stringify(cfg,null,2);
+  notify('Special categories and audio applied. Preview or save to keep changes.');
+ };
+}
+
 function renderDesigner(){
  const place=$('#hotspotDesigner');if(!place)return;
  if($('#gameMode').value==='special'){renderSpecialDesigner(place);return}if($('#gameMode').value!=='hotspots'){renderChoiceDesigner(place);return}
