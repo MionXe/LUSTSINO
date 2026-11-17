@@ -4,7 +4,7 @@ const $=s=>document.querySelector(s);
 const reduce=window.matchMedia('(prefers-reduced-motion: reduce)');
 const DURATION=4200;
 let current=0,nextAt=Date.now()+DURATION,autoplay=!reduce.matches;
-let touchStart=null,manualUntil=0,lastSignature='';
+let touchStart=null,manualUntil=0,lastSignature='',firstNode=null;
 const cards=()=>Array.from($('#featuredGames')?.querySelectorAll('.game-card')||[]);
 const wrap=(n,total)=>((n%total)+total)%total;
 function layout(n,resetClock=true){
@@ -66,7 +66,7 @@ function navigate(n){
 function sync(){
  const list=cards();
  const sig=list.map(el=>el.getAttribute('data-start')||el.textContent.slice(0,30)).join('|');
- if(sig!==lastSignature){lastSignature=sig;current=Math.min(current,Math.max(0,list.length-1));layout(current,true)}
+ if(sig!==lastSignature||firstNode!==list[0]){lastSignature=sig;firstNode=list[0]||null;current=Math.min(current,Math.max(0,list.length-1));layout(current,true)}
 }
 function start(){
  const stage=$('#featuredGames');
