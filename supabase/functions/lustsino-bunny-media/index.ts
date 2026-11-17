@@ -10,7 +10,17 @@ const bucket = Deno.env.get("BUNNY_STORAGE_ZONE") || "lustsino-media";
 const endpoint = Deno.env.get("BUNNY_S3_ENDPOINT") || "https://ny-s3.storage.bunnycdn.com";
 const accessKeyId = Deno.env.get("BUNNY_S3_ACCESS_KEY_ID") || "";
 const secretAccessKey = Deno.env.get("BUNNY_S3_SECRET_ACCESS_KEY") || "";
-const cdnBase = (Deno.env.get("BUNNY_CDN_BASE_URL") || "").replace(/\/$/, "");
+const rawCdn = (Deno.env.get("BUNNY_CDN_BASE_URL") || "").trim();
+const cdnBase = (() => {
+  if (!rawCdn) return "";
+  try {
+    const candidate = /^https?:\/\//i.test(rawCdn) ? rawCdn : "https://" + rawCdn;
+    const url = new URL(candidate);
+    if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash ||
+        (url.pathname !== "/" && url.pathname !== "") || !url.hostname.includes(".")) return "";
+    return url.origin;
+  } catch { return ""; }
+})();
 const mimeExtensions: Record<string,string> = {
   "image/webp":"webp", "image/jpeg":"jpg", "image/png":"png", "image/gif":"gif",
   "video/mp4":"mp4", "video/webm":"webm"
@@ -24,7 +34,7 @@ const h = (origin: string) => ({
   "Cache-Control":"no-store"
 });
 const response = (origin:string, data:unknown, status=200) => new Response(JSON.stringify(data),{status,headers:h(origin)});
-const safeUrl = (key:string) => cdnBase && /^https:\/\//.test(cdnBase)
+const safeUrl = (key:string) => !!cdnBase
   ? cdnBase + "/" + key.split("/").map(encodeURIComponent).join("/")
   : null;
 const s3 = () => {
@@ -60,7 +70,7 @@ Deno.serve(async (request:Request) => {
       ready:!!accessKeyId && !!secretAccessKey && !!cdnBase,
       storageConfigured:!!accessKeyId && !!secretAccessKey,
       deliveryConfigured:!!cdnBase,
-      storageZone:bucket
+      storageZone:bucket, cdnHostnameValid: !!cdnBase, cdnEntryPresent: !!rawCdn
     });
     const client=s3();
     if(action==="presign"){
@@ -137,7 +147,7 @@ Deno.serve(async (request:Request) => {
       }));
       return response(origin,{items:(data.Contents||[]).filter(x=>x.Key&&!x.Key.endsWith("/")).map(x=>({
         key:x.Key,size:x.Size,modified:x.LastModified?.toISOString(),url:safeUrl(x.Key!)
-      })),next:data.NextContinuationToken||null,deliveryReady:!!cdnBase});
+      })),next:data.NextContinuationToken||null,deliveryReady:!!cdnBase,cdnError:rawCdn&&!cdnBase?"Use a valid HTTPS Pull Zone hostname (not the S3 URL)":null});
     }
     return response(origin,{error:"Unknown action"},400);
   }catch(error){
