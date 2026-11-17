@@ -278,12 +278,12 @@ function renderStudioMedia(root,editId=null){
  <div class="mini-note"><b>Batch import:</b> The supplied 177-image archive is already added locally. For live Supabase uploads, sign in as an owner, enable an approved storage bucket, and use the batch upload option below.</div>
  <form id="batchUploadForm"><div class="form-grid"><div class="field span2"><label>Select approved media files (multiple)</label><input type="file" name="batch" multiple accept="image/jpeg,image/png,image/webp,video/mp4,video/webm" ${config.uploadsEnabled&&isAdmin?'':'disabled'}></div><div class="field"><label>Assign creator</label><select name="creator_id">${state.creators.map(c=>`<option value="${escapeHTML(c.id)}">${escapeHTML(c.name)}</option>`).join('')}</select></div><div class="field"><label>Rights reference for selected files</label><input name="rights_ref" placeholder="License / release ID"></div></div><button type="submit" class="button secondary" ${config.uploadsEnabled&&isAdmin?'':'disabled'}>Upload approved batch as drafts</button></form>
  `;
- root.insertAdjacentHTML('afterbegin', '<section class="member-card" id="bunnyLibraryBlock"><div class="overline">BUNNY STORAGE</div><h3>Already-uploaded media</h3><p>Browse Bunny objects, select one, then assign its correct verified creator and rights reference below. Importing a file does not publish it.</p><div class="studio-actions"><button class="button secondary" id="bunnyListBtn" type="button">Browse Bunny files</button><button class="button subtle" id="bunnyHealthBtn" type="button">Test Bunny connection</button><button class="button subtle" id="bunnyMoreBtn" type="button" hidden>Load more</button></div><p id="bunnyHealthStatus" class="mini-note" role="status">Select “Test Bunny connection” to validate storage and CDN configuration.</p><div id="bunnyLibrary" class="table-scroller"></div></section>');
+ root.insertAdjacentHTML('afterbegin', '<section class="member-card" id="bunnyLibraryBlock"><div class="overline">BUNNY STORAGE</div><h3>Already-uploaded media</h3><p>Browse Bunny objects, select one, then assign its correct verified creator and rights reference below. Importing a file does not publish it.</p><div class="studio-actions"><button class="button secondary" id="bunnyListBtn" type="button">Browse Bunny files</button><button class="button subtle" id="bunnyHealthBtn" type="button">Test Bunny connection</button><button class="button subtle" id="bunnyMoreBtn" type="button" hidden>Load more</button></div><p id="bunnyHealthStatus" class="mini-note" role="status">Select “Test Bunny connection” to validate storage and CDN configuration.</p><p id="bunnyDeliveryStatus" class="mini-note" role="status" aria-live="polite"></p><div id="bunnyLibrary" class="table-scroller"></div></section>');
  let bunnyEntries=[],continuation=null;
  const drawBunny=()=>{
   const out=$('#bunnyLibrary');
   out.innerHTML=bunnyEntries.length?'<table><thead><tr><th>FILE</th><th>SIZE</th><th>ACTION</th></tr></thead><tbody>'+
-   bunnyEntries.map((entry,i)=>'<tr><td style="max-width:360px;overflow-wrap:anywhere">'+escapeHTML(entry.key)+'</td><td>'+Math.round((entry.size||0)/1024)+' KB</td><td><button class="table-action" data-bunny-entry="'+i+'" '+(entry.url?'':'disabled title="Set Bunny CDN hostname first"')+'>Use file</button></td></tr>').join('')+
+   bunnyEntries.map((entry,i)=>'<tr><td style="max-width:360px;overflow-wrap:anywhere">'+escapeHTML(entry.key)+'</td><td>'+Math.round((entry.size||0)/1024)+' KB</td><td><button class="table-action" data-bunny-entry="'+i+'" '+(entry.url?'':'disabled title="Set Bunny CDN hostname first"')+'>Use file</button> <button class="table-action" data-bunny-test="'+i+'" '+(entry.url?'':'disabled')+'>Test CDN</button></td></tr>').join('')+
    '</tbody></table>':'<p>No Bunny objects found.</p>';
   out.querySelectorAll('[data-bunny-entry]').forEach(b=>b.onclick=()=>{
    const file=bunnyEntries[Number(b.dataset.bunnyEntry)];
@@ -295,6 +295,33 @@ function renderStudioMedia(root,editId=null){
    form.elements.age_verified.checked=false;
    form.scrollIntoView({behavior:'smooth',block:'start'});
    notify('File selected. Assign the creator, rights record, and approval status before saving.');
+  });
+  out.querySelectorAll('[data-bunny-test]').forEach(btn=>btn.onclick=async()=>{
+   const file=bunnyEntries[Number(btn.dataset.bunnyTest)];
+   const status=$('#bunnyDeliveryStatus');
+   if(!file||!file.url||!status)return;
+   const {data:{session}}=await supabase.auth.getSession();
+   if(!session){status.textContent='Master session expired. Please sign in again.';return;}
+   btn.disabled=true;status.textContent='Testing Bunny CDN delivery for selected file…';
+   try{
+    const response=await fetch(config.uploadEndpoint,{
+     method:'POST',
+     headers:{'Content-Type':'application/json',Authorization:'Bearer '+session.access_token,apikey:config.supabaseAnonKey},
+     body:JSON.stringify({action:'cdn-check',key:file.key})
+    });
+    const result=await response.json().catch(()=>({}));
+    if(!response.ok)throw Error(result.error||('Gateway HTTP '+response.status));
+    const code=Number(result.cdnStatus)||0;
+    const kind=String(result.cdnContentType||'not reported').slice(0,80);
+    if(!result.cdnReachable){
+     status.textContent='Storage contains the file, but CDN returned HTTP '+code+'. Check the Pull Zone origin, token rules and delivery settings before using this file.';
+    }else{
+     const link=safeURL(result.deliveryUrl||file.url);
+     status.innerHTML='CDN HEAD passed: HTTP '+code+' · '+escapeHTML(kind)+' · '+Math.round((Number(result.storageBytes)||0)/1024)+' KB. '+(link?'<a href="'+escapeHTML(link)+'" target="_blank" rel="noopener noreferrer">Open this file in a new tab to verify browser delivery ↗</a>':'');
+     if(!/^(image|video)\//i.test(kind))status.insertAdjacentText('beforeend',' Check Content-Type configuration: expected image/* or video/*.');
+    }
+   }catch(error){status.textContent='CDN test failed: '+(error.message||String(error));}
+   finally{btn.disabled=false;}
   });
   $('#bunnyMoreBtn').hidden=!continuation;
  };
