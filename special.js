@@ -84,7 +84,7 @@
    stopJobs();state.step='shuffle';
    state.root.innerHTML=controls(title('03 · SHUFFLE','Track those cards','Keep your eyes on your two cards as the deck rearranges.')+
     '<div class="special-shuffle-board" id="specialShuffleBoard">'+cards.map((c,i)=>
-    '<div class="special-moving-card" data-move-id="'+i+'" style="--slot:'+i+';--count:'+cards.length+'"><span class="special-card-back">✦</span></div>').join('')+'</div>'+
+    '<div class="special-moving-card" data-move-id="'+i+'" style="left:'+(((i+.5)/cards.length)*100)+'%"><span class="special-card-back">✦</span></div>').join('')+'</div>'+
     '<p class="special-selection" id="specialShuffleStatus">Mixing the deck…</p>');
    voice('shuffle');
    let rounds=0;
@@ -94,7 +94,7 @@
     const next=state.permutation.slice();
     for(let i=next.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[next[i],next[j]]=[next[j],next[i]]}
     state.permutation=next;
-    moving.forEach((el,i)=>el.style.setProperty('--slot',next.indexOf(i)));
+    moving.forEach((el,i)=>el.style.left=(((next.indexOf(i)+.5)/cards.length)*100)+'%');
     if(++rounds<6)later(perform,520);
     else later(renderRecall,650);
    };
@@ -130,7 +130,7 @@
   function mediaCard(item){
    const url=safeURL(item?.media_url);
    if(!url)return '<div class="special-empty-media">No image available</div>';
-   if(item.media_type==='video')return '<video muted playsinline preload="metadata" src="'+cssEscape(url)+'"></video>';
+   if(item.media_type==='video')return '<video muted playsinline controls preload="metadata" src="'+cssEscape(url)+'"></video>';
    return '<img src="'+cssEscape(url)+'" alt="'+cssEscape(item.title||'Creator media')+'" loading="eager">';
   }
   async function loadMedia(){
@@ -144,7 +144,10 @@
     .contains('tags',[state.resultTag]).order('created_at',{ascending:false}).limit(75);
    if(!alive())return;
    if(error){showMissing('Could not load this theme. Please try again.');return}
-   state.media=(data||[]).filter(p=>safeURL(p.media_url));
+   const all=(data||[]).filter(p=>safeURL(p.media_url));
+   const preferenceTag=state.preference==='Men'?'men':state.preference==='Women'?'women':null;
+   const preferred=preferenceTag?all.filter(p=>(p.tags||[]).includes(preferenceTag)):[];
+   state.media=preferred.length?preferred:all;
    if(!state.media.length){showMissing('No published media is available under #'+state.resultTag+' yet.');return}
    state.reelIndex=Math.floor(Math.random()*state.media.length);
    renderReel();
