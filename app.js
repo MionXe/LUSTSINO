@@ -224,12 +224,26 @@ function studioIntro(title,description){return `<div><h2>${title}</h2><p>${descr
 function renderStudio(){const status=$('#studioStatus');if(status)status.textContent=isAdmin?'HOUSE MASTER · SECURE DASHBOARD':'Dashboard unavailable';$('#studioAuthButton').textContent=isAdmin?'Sign out':'Admin sign in';if(!remote){$('#studioContent').innerHTML='<div class="member-card"><h2>Live connection required</h2><p>Studio uses live Supabase records only. Check your internet connection, then reload.</p></div>';return;}if(remote&&!isAdmin){$('#studioContent').innerHTML=`${studioIntro('Owner sign-in required','Visitors do not need accounts. Your admin tools are protected by Supabase Auth and row-level security.')}<div class="mini-note">Guests can browse published games without signing in. To publish, sign in with an authorized Master account.</div><button class="button primary" id="loginFromStudio">Sign in to studio ↗</button>`;$('#loginFromStudio').onclick=authModal;return}
 $$('[data-studio-tab]').forEach(e=>e.classList.toggle('active',e.dataset.studioTab===state.studioTab));const root=$('#studioContent');switch(state.studioTab){case'overview':renderStudioOverview(root);break;case'creators':renderStudioCreators(root);break;case'applications':renderStudioApplications(root);break;case'media':renderStudioMedia(root);break;case'experiences':renderStudioGames(root);break;case'reports':renderStudioReports(root);break;case'settings':renderStudioSettings(root);break;}}
 async function renderStudioReports(root){
- root.innerHTML=studioIntro('Content reports','Only authenticated allowlisted owners can view and process reports.')+'<p class="muted">Loading reports...</p>';
- if(!remote||!supabase){root.innerHTML=studioIntro('Content reports','Reporting is a backend feature. Install the SQL schema and connect Supabase to receive reports.');return}
- if(!isAdmin){root.innerHTML='<p>Owner sign-in required.</p>';return}
- const {data,error}=await supabase.from('content_reports').select('id,reason,details,media_id,experience_id,created_at').order('created_at',{ascending:false}).limit(100);
- if(error){root.innerHTML='<p>'+escapeHTML(error.message)+'</p>';return}
- root.innerHTML=studioIntro('Content reports','Review content concerns. Investigate and remove infringing or unsafe media promptly.')+`<div class="table-scroller"><table><thead><tr><th>REASON</th><th>CONTENT ID</th><th>DETAILS</th><th>DATE</th></tr></thead><tbody>${(data||[]).map(r=>`<tr><td>${escapeHTML(r.reason)}</td><td>${escapeHTML(r.media_id||r.experience_id||'—')}</td><td>${escapeHTML(r.details||'—')}</td><td>${escapeHTML(new Date(r.created_at).toLocaleString())}</td></tr>`).join('')||'<tr><td colspan="4">No reports yet</td></tr>'}</tbody></table></div>`;
+ root.innerHTML=studioIntro('Content reports','Review and act on reported posts, media and games.')+'<p class="muted">Loading reports…</p>';
+ if(!remote||!supabase||!isAdmin){root.innerHTML='<p>Master account required.</p>';return;}
+ const {data,error}=await supabase.from('content_reports')
+  .select('id,reason,details,post_id,media_id,experience_id,created_at')
+  .order('created_at',{ascending:false}).limit(100);
+ if(error){root.innerHTML='<p>'+escapeHTML(error.message)+'</p>';return;}
+ root.innerHTML=studioIntro('Content reports','Review complaints and remove content that infringes rights, privacy or consent.')+
+ '<div class="table-scroller"><table><thead><tr><th>REASON</th><th>CONTENT ID</th><th>DETAILS</th><th>DATE</th><th>ACTION</th></tr></thead><tbody>'+
+ ((data||[]).map(report=>'<tr><td>'+escapeHTML(report.reason)+'</td><td>'+
+ escapeHTML(report.post_id||report.media_id||report.experience_id||'—')+'</td><td>'+
+ escapeHTML(report.details||'—')+'</td><td>'+new Date(report.created_at).toLocaleString()+'</td><td>'+
+ (report.post_id?'<button class="table-action danger" data-unpublish-report="'+escapeHTML(report.post_id)+'" type="button">Remove post from feed</button>':'—')+
+ '</td></tr>').join('')||'<tr><td colspan="5">No reports yet</td></tr>')+'</tbody></table></div>';
+ root.querySelectorAll('[data-unpublish-report]').forEach(button=>button.onclick=async()=>{
+  if(!confirm('Remove this reported post from public view?'))return;
+  button.disabled=true;
+  const {error}=await supabase.from('community_posts').update({published:false,review_status:'rejected'}).eq('id',button.dataset.unpublishReport);
+  if(error){button.disabled=false;return notify(error.message);}
+  notify('Reported post removed from the public feed.');renderStudioReports(root);
+ });
 }
 function renderStudioOverview(root){root.innerHTML=`${studioIntro('Overview','Content inventory and experience management.')}
 <div class="studio-stats"><div class="studio-stat"><b>${state.experiences.length}</b><small>INTERACTIVE GAMES</small></div><div class="studio-stat"><b>${state.creators.length}</b><small>CREATOR PROFILES</small></div><div class="studio-stat"><b>${state.media.length}</b><small>MEDIA RECORDS</small></div></div>
@@ -238,11 +252,11 @@ function renderStudioOverview(root){root.innerHTML=`${studioIntro('Overview','Co
 
 async function renderStudioApplications(root){
  if(!isAdmin||!supabase)return;
- root.innerHTML=studioIntro('House Creator applications','Review identity, age, consent and rights documentation before full verification.')+'<p>Loading applications…</p>';
+ root.innerHTML=studioIntro('House Creator applications','Game creation is available to ordinary player accounts. Only public adult-media publishing requires documented identity, age and rights verification.')+'<p>Loading applications…</p>';
  const {data,error}=await supabase.from('creator_applications').select('id,user_id,note,portfolio_url,created_at,stage').order('created_at',{ascending:false}).limit(100);
  if(error){root.innerHTML='<p>'+escapeHTML(error.message)+'</p>';return}
- root.innerHTML=studioIntro('House Creator applications','Step 1: draft studio access after 20 minutes. Step 2: manual House Master verification before public publishing.')+`<div class="table-scroller"><table><thead><tr><th>APPLICANT</th><th>DATE</th><th>STATUS</th><th>REVIEW</th></tr></thead><tbody>${(data||[]).map(x=>`<tr><td><strong>${escapeHTML(x.user_id.slice(0,8))}</strong><br><small>${escapeHTML(x.note||'No introduction')}</small></td><td>${new Date(x.created_at).toLocaleString()}</td><td>${escapeHTML(x.stage)}</td><td>${x.stage==='pending'?`<button class="table-action" data-approve-app="${escapeHTML(x.id)}">Verify step 2</button> <button class="table-action danger" data-decline-app="${escapeHTML(x.id)}">Decline</button>`:'Reviewed'}</td></tr>`).join('')||'<tr><td colspan="4">No applications yet</td></tr>'}</tbody></table></div>`;
- root.querySelectorAll('[data-approve-app]').forEach(b=>b.onclick=async()=>{const evidence=prompt('Enter the internal reference for completed identity, legal-age, consent and content-rights checks:');if(!evidence||evidence.trim().length<8)return;const {error}=await supabase.rpc('lustsino_decide_creator',{p_application:b.dataset.approveApp,p_approve:true,p_evidence_ref:evidence.trim()});if(error)return notify(error.message);notify('House Creator verified.');renderStudioApplications(root)});
+ root.innerHTML=studioIntro('House Creator applications','All signed-in players can save private games without approval. Verified House Creators can publish eligible media without a separate review for each post.')+`<div class="table-scroller"><table><thead><tr><th>APPLICANT</th><th>DATE</th><th>STATUS</th><th>REVIEW</th></tr></thead><tbody>${(data||[]).map(x=>`<tr><td><strong>${escapeHTML(x.user_id.slice(0,8))}</strong><br><small>${escapeHTML(x.note||'No introduction')}</small></td><td>${new Date(x.created_at).toLocaleString()}</td><td>${escapeHTML(x.stage)}</td><td>${x.stage==='pending'?`<input data-app-evidence="${escapeHTML(x.id)}" type="text" maxlength="240" placeholder="Document / release verification reference" aria-label="Verified adult media documentation reference" style="max-width:180px;font-size:11px"> <button type="button" class="table-action" data-approve-app="${escapeHTML(x.id)}">Verify adult creator</button> <button class="table-action danger" data-decline-app="${escapeHTML(x.id)}">Decline</button>`:'Reviewed'}</td></tr>`).join('')||'<tr><td colspan="4">No applications yet</td></tr>'}</tbody></table></div>`;
+ root.querySelectorAll('[data-approve-app]').forEach(b=>b.onclick=async()=>{const evidence=root.querySelector('[data-app-evidence="'+b.dataset.approveApp+'"]')?.value?.trim()||'';if(evidence.length<8)return notify('Game-building accounts need no approval. Public adult media still needs a genuine completed verification reference.');const {error}=await supabase.rpc('lustsino_decide_creator',{p_application:b.dataset.approveApp,p_approve:true,p_evidence_ref:evidence.trim()});if(error)return notify(error.message);notify('House Creator verified.');renderStudioApplications(root)});
  root.querySelectorAll('[data-decline-app]').forEach(b=>b.onclick=async()=>{if(!confirm('Decline this application?'))return;const {error}=await supabase.rpc('lustsino_decide_creator',{p_application:b.dataset.declineApp,p_approve:false,p_evidence_ref:''});if(error)return notify(error.message);renderStudioApplications(root)});
 }
 
@@ -283,11 +297,13 @@ function renderStudioMedia(root,editId=null){
  const drawBunny=()=>{
   const out=$('#bunnyLibrary');
   out.innerHTML=bunnyEntries.length?'<table><thead><tr><th>FILE</th><th>SIZE</th><th>ACTION</th></tr></thead><tbody>'+
-   bunnyEntries.map((entry,i)=>'<tr><td style="max-width:360px;overflow-wrap:anywhere">'+escapeHTML(entry.key)+'</td><td>'+Math.round((entry.size||0)/1024)+' KB</td><td><button class="table-action" data-bunny-entry="'+i+'" '+(entry.url?'':'disabled title="Set Bunny CDN hostname first"')+'>Use file</button> <button class="table-action" data-bunny-test="'+i+'" '+(entry.url?'':'disabled')+'>Test CDN</button></td></tr>').join('')+
+   bunnyEntries.map((entry,i)=>'<tr><td style="max-width:360px;overflow-wrap:anywhere">'+escapeHTML(entry.key)+'</td><td>'+Math.round((entry.size||0)/1024)+' KB</td><td><button class="table-action" data-bunny-entry="'+i+'" '+''+'>Use file</button> <button class="table-action" data-bunny-test="'+i+'" '+''+'>Test CDN</button></td></tr>').join('')+
    '</tbody></table>':'<p>No Bunny objects found.</p>';
   out.querySelectorAll('[data-bunny-entry]').forEach(b=>b.onclick=()=>{
    const file=bunnyEntries[Number(b.dataset.bunnyEntry)];
    const form=$('#mediaForm');
+   if(!file?.url)return notify('No delivery URL for this object. Check that BUNNY_CDN_BASE_URL is your actual HTTPS Pull Zone hostname.');
+   if(!form)return notify('The media form is unavailable; reopen Studio → Media.');
    form.elements.name.value=file.key.split('/').pop().replace(/\.[^.]+$/,'').slice(0,80);
    form.elements.url.value=file.url;
    form.elements.type.value=/\.(mp4|webm)$/i.test(file.key)?'video':'image';
@@ -299,7 +315,7 @@ function renderStudioMedia(root,editId=null){
   out.querySelectorAll('[data-bunny-test]').forEach(btn=>btn.onclick=async()=>{
    const file=bunnyEntries[Number(btn.dataset.bunnyTest)];
    const status=$('#bunnyDeliveryStatus');
-   if(!file||!file.url||!status)return;
+   if(!file||!status)return;
    const {data:{session}}=await supabase.auth.getSession();
    if(!session){status.textContent='Master session expired. Please sign in again.';return;}
    btn.disabled=true;status.textContent='Testing Bunny CDN delivery for selected file…';
