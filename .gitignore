@@ -1,0 +1,13 @@
+# Credentials and machine files
+.env
+.env.*
+!.env.example
+.vercel/
+node_modules/
+.DS_Store
+*.log
+*.zip
+# Adult media MUST be distributed only through an authorized age-gated storage provider.
+assets/media/
+private-media/
+creator-uploads/
