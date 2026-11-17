@@ -43,3 +43,33 @@
 .master-only[hidden]{display:none!important}
 @media(max-width:640px){#featuredGames.carousel-game-grid{height:305px!important}#featuredGames.carousel-game-grid .game-card{width:175px!important;top:14px!important}.feature-spotlight{min-width:0!important}.spotlight-copy{min-width:0!important}.spotlight-copy h3{overflow-wrap:anywhere}.header-actions{min-width:0;flex-wrap:wrap}.studio-grid,.account-columns{min-width:0;grid-template-columns:minmax(0,1fr)!important}.studio-panel,.member-panel,.page-wrap{min-width:0;max-width:100%}.member-card{min-width:0;overflow-wrap:anywhere}input,select,textarea{max-width:100%}.footer-links{flex-wrap:wrap}}
 @media(prefers-reduced-motion:reduce){#featuredGames.carousel-game-grid .game-card{transition:none!important}}
+
+
+/* V9: definitive featured slideshow styles; card positions are controlled by v5-experience.js. */
+#featuredGames.carousel-game-grid{position:relative!important;display:block!important;overflow:hidden!important;min-height:360px!important;height:420px!important;perspective:1100px!important;transform-style:preserve-3d;isolation:isolate;touch-action:pan-y;scroll-snap-type:none!important;scroll-behavior:auto!important}
+#featuredGames.carousel-game-grid>.game-card{position:absolute!important;top:20px!important;left:50%!important;width:250px!important;max-width:none!important;height:360px!important;margin:0!important;flex:none!important;scroll-snap-align:none!important;transform-origin:center!important;transition:transform .88s cubic-bezier(.22,.9,.25,1),opacity .7s,filter .7s,box-shadow .65s!important;will-change:transform,opacity;filter:brightness(.60) saturate(.78)}
+#featuredGames.carousel-game-grid>.game-card.feature-active{filter:brightness(1) saturate(1.12)!important;border-color:#f5d491;box-shadow:0 0 0 2px #f8d797,0 25px 55px #000b,0 0 42px #eea96c88!important}
+#featuredGames.carousel-game-grid>.game-card.feature-active::before{content:"";position:absolute;inset:-5px;border-radius:inherit;pointer-events:none;z-index:8;border:2px solid #f8dba6;animation:lobbyGlow 1.4s ease-in-out infinite alternate;box-shadow:0 0 14px #ffdd99aa}
+#featuredGames.carousel-game-grid>.game-card.feature-active .game-cover-image{animation:lobbyCoverMotion 4.2s ease-in-out both}
+#featuredGames.carousel-game-grid>.game-card:not(.feature-active) .game-cover-image{animation:none!important}
+@keyframes lobbyGlow{from{opacity:.56;box-shadow:0 0 10px #ffd08955}to{opacity:1;box-shadow:0 0 32px #ffdd99bb}}
+@keyframes lobbyCoverMotion{0%{transform:scale(1.01)}55%{transform:scale(1.09)}100%{transform:scale(1.035)}}
+.lobby-progress{width:min(285px,65vw);height:4px;background:#72505b88;margin:14px auto 10px;border-radius:10px;overflow:hidden}
+.lobby-progress i{display:block;width:100%;height:100%;background:linear-gradient(90deg,#bc6f72,#e9b66c,#fff2c5);transform-origin:left;transform:scaleX(0);box-shadow:0 0 12px #eecb8f}
+@keyframes lobbyCountdown{0%{transform:scaleX(0)}100%{transform:scaleX(1)}}
+.carousel-controls .lobby-auto{font-size:11px!important;line-height:1.2;width:auto!important;height:auto!important;border-radius:99px!important;padding:9px 12px!important;margin-left:11px;color:#fbe6be!important;background:#3b2030!important;white-space:nowrap}
+#featureSpotlight{overflow:hidden}#featureSpotlight .spotlight-cover.spotlight-flash{animation:featureEntrance .7s ease both,featureBreathe 10s ease-in-out .7s infinite}
+@media(max-width:680px){
+ #featuredGames.carousel-game-grid{height:310px!important;min-height:310px!important}
+ #featuredGames.carousel-game-grid>.game-card{width:178px!important;height:282px!important;top:12px!important}
+ #featuredGames.carousel-game-grid .game-cover{height:170px!important;min-height:170px}
+ #featuredGames.carousel-game-grid .game-card-text{padding:10px 11px!important}
+ #featuredGames.carousel-game-grid .game-card-text h3{font-size:17px!important}
+ #featuredGames.carousel-game-grid .game-card-text p{font-size:11px;line-height:1.35;max-height:29px}
+ .carousel-controls{flex-wrap:wrap;gap:8px}.carousel-controls .lobby-auto{font-size:10px!important;padding:8px!important}
+}
+@media(prefers-reduced-motion:reduce){
+ #featuredGames.carousel-game-grid>.game-card{transition:none!important}
+ #featuredGames.carousel-game-grid>.game-card.feature-active::before,#featuredGames.carousel-game-grid>.game-card.feature-active .game-cover-image{animation:none!important}
+ .lobby-progress i{animation:none!important}
+}
