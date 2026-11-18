@@ -423,7 +423,7 @@ function renderMemberEditor(approved){
  newGame.currentNode=idx;
  const node=newGame.nodes[idx],end=idx===count-1;
  const selected=approved.find(m=>m.id===node.mediaId);
- const visual=safeUrl(node.mediaUrl||selected?.url||'');
+ const visual=(node.previewObjectUrl?.startsWith('blob:')?node.previewObjectUrl:'')||safeUrl(node.mediaUrl||selected?.url||'');
  root.innerHTML='<section class="game-step-panel path-member-editor">'+
   '<div class="overline">CIRCLE PATHS DESIGNER</div><h3>Build each round visually</h3>'+
   '<div class="path-toolbar">'+
@@ -436,7 +436,8 @@ function renderMemberEditor(approved){
   '<div class="round-media-tools"><label>Choose cleared media<select id="memberNodeMedia">'+approvalSelect(node.mediaId)+'</select></label>'+
   '<label>Add an image/GIF for this round<input id="memberNodeFile" type="file" accept="image/jpeg,image/png,image/webp,image/gif"></label></div>'+
   (visual?'<p class="micro-note">Previewing your selected round media. Public release requires a cleared media assignment.</p>':'<p class="micro-note">Select an image to place circles on it.</p>')+
-  '<div class="member-hotspot-canvas" id="memberCanvas" style="background-image:'+(visual?'linear-gradient(#0002,#0005),url(&quot;'+esc(visual)+'&quot;)':'none')+'">'+
+  '<div class="member-hotspot-canvas '+(visual?'has-photo':'no-photo')+'" id="memberCanvas">'+
+  (visual?'<img class="member-round-photo" src="'+esc(visual)+'" alt="Round '+(idx+1)+' artwork for circle placement" draggable="false">':'<div class="member-round-empty">Upload a picture to position your circles accurately.</div>')+
   (node.spots||[]).map((spot,i)=>'<button class="member-hotspot" type="button" data-index="'+i+'" style="left:'+spot.x+'%;top:'+spot.y+'%;width:'+spot.w+'%;height:'+spot.h+'%;border-radius:'+(spot.shape==='oval'?'50%':'12px')+'">'+esc(spot.label)+'</button>').join('')+
   '<span class="canvas-caption">'+(end?'FINAL REVEAL':'DRAG SPOTS · TAP IMAGE TO ADD A CIRCLE')+'</span></div>'+
   '<div class="round-timing"><label>Reveal duration: <strong id="roundSecondsLabel">'+(node.preview_seconds||5)+' sec</strong>'+
@@ -465,6 +466,9 @@ function renderMemberEditor(approved){
  $('#memberNodeFile').onchange=async e=>{
   const file=e.target.files?.[0];if(!file)return;
   const ref='';
+  if(node.previewObjectUrl)URL.revokeObjectURL(node.previewObjectUrl);
+  node.previewObjectUrl=URL.createObjectURL(file);
+  renderMemberEditor(approved); // Local preview appears before the network upload finishes.
   try {
    if(!window.LUSTSINO_UPLOAD)throw Error('Uploader unavailable; refresh the page.');
    const result=await window.LUSTSINO_UPLOAD.upload(file,ref,text=>{const el=$('#gameSaveStatus');if(el)el.textContent=text});
@@ -476,7 +480,8 @@ function renderMemberEditor(approved){
  const canvas=$('#memberCanvas');
  canvas.onclick=e=>{
   if(e.target.closest('button')||node.spots.length>=8||end)return;
-  const b=canvas.getBoundingClientRect(),x=Math.round((e.clientX-b.left)/b.width*100),y=Math.round((e.clientY-b.top)/b.height*100);
+  if(!visual){msg('Upload a round image before placing circles.');return;}
+  const b=canvas.getBoundingClientRect(),x=Math.max(0,Math.min(100,Math.round((e.clientX-b.left)/b.width*100))),y=Math.max(0,Math.min(100,Math.round((e.clientY-b.top)/b.height*100)));
   node.spots.push({x,y,w:18,h:15,shape:'oval',label:String(node.spots.length+1),next:'round_'+String(idx+2).padStart(2,'0')});
   renderMemberEditor(approved);
  };
