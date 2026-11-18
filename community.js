@@ -398,21 +398,26 @@ function renderMemberEditor(approved){
     '<label>Choice label<input data-choice-label="'+i+'" maxlength="80" value="'+esc(item.label||'')+'"></label>'+
     '<label>Cleared media<select data-choice-media="'+i+'">'+approvalSelect(item.mediaId)+'</select></label>'+
     '<label>Upload your own media<input type="file" data-choice-upload="'+i+'" accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm"></label>'+
-    (item.mediaUrl?'<div class="outcome-media-preview">'+( /\.(mp4|webm)([?#]|$)/i.test(item.mediaUrl)?'<video src="'+esc(item.mediaUrl)+'" controls muted playsinline></video>':'<img src="'+esc(item.mediaUrl)+'" alt="Outcome media">')+'</div>':'')+
+    ((item.previewObjectUrl||item.mediaUrl)?'<div class="outcome-media-preview">'+( (item.previewMime||'').startsWith('video/')||/\.(mp4|webm)([?#]|$)/i.test(item.mediaUrl||'')?'<video src="'+esc(item.previewObjectUrl||item.mediaUrl)+'" controls muted playsinline></video>':'<img src="'+esc(item.previewObjectUrl||item.mediaUrl)+'" alt="Outcome media">')+'</div>':'')+
     '<label>Reveal time: <b id="choiceSeconds_'+i+'">'+(item.seconds||15)+'s</b><input type="range" min="3" max="60" step="1" value="'+(item.seconds||15)+'" data-choice-seconds="'+i+'"></label>'+
     '<p class="game-file-status" data-choice-status="'+i+'"></p></div>').join('')+'</div></section>';
   $all('[data-choice-label]',root).forEach(input=>input.oninput=()=>{rows[Number(input.dataset.choiceLabel)].label=input.value});
-  $all('[data-choice-media]',root).forEach(input=>input.onchange=()=>{rows[Number(input.dataset.choiceMedia)].mediaId=input.value;rows[Number(input.dataset.choiceMedia)].mediaUrl='';rows[Number(input.dataset.choiceMedia)].uploadId='';renderMemberEditor(approved)});
+  $all('[data-choice-media]',root).forEach(input=>input.onchange=()=>{rows[Number(input.dataset.choiceMedia)].mediaId=input.value;rows[Number(input.dataset.choiceMedia)].mediaUrl='';rows[Number(input.dataset.choiceMedia)].uploadId='';if(rows[Number(input.dataset.choiceMedia)].previewObjectUrl){URL.revokeObjectURL(rows[Number(input.dataset.choiceMedia)].previewObjectUrl);rows[Number(input.dataset.choiceMedia)].previewObjectUrl=''}renderMemberEditor(approved)});
   $all('[data-choice-seconds]',root).forEach(input=>input.oninput=()=>{const i=Number(input.dataset.choiceSeconds);rows[i].seconds=Number(input.value);$('#choiceSeconds_'+i).textContent=input.value+'s'});
   $all('[data-choice-upload]',root).forEach(input=>input.onchange=async()=>{
    const file=input.files?.[0],i=Number(input.dataset.choiceUpload);
    if(!file)return;const ref='';
-   const status=$('[data-choice-status="'+i+'"]',root);
+   if(rows[i].previewObjectUrl)URL.revokeObjectURL(rows[i].previewObjectUrl);
+   rows[i].previewObjectUrl=URL.createObjectURL(file);
+   rows[i].previewMime=file.type;
+   renderMemberEditor(approved); // Show local media before Bunny finishes.
+   const status=$('#gameSaveStatus');
    try{
     if(!window.LUSTSINO_UPLOAD)throw Error('Uploader unavailable; reload the site.');
     const output=await window.LUSTSINO_UPLOAD.upload(file,ref,text=>{if(status)status.textContent=text});
     rows[i].mediaUrl=output.url;rows[i].uploadId=output.uploadId;rows[i].mediaId='';
-    msg('Image uploaded for outcome '+(i+1)+'. Add a cleared media assignment before public release.');
+    if(rows[i].previewObjectUrl){URL.revokeObjectURL(rows[i].previewObjectUrl);rows[i].previewObjectUrl='';}
+    msg('Outcome '+(i+1)+' image uploaded successfully.');
     renderMemberEditor(approved);
    }catch(error){if(status)status.textContent=error.message||'Upload failed.'}
   });
@@ -473,7 +478,7 @@ function renderMemberEditor(approved){
    if(!window.LUSTSINO_UPLOAD)throw Error('Uploader unavailable; refresh the page.');
    const result=await window.LUSTSINO_UPLOAD.upload(file,ref,text=>{const el=$('#gameSaveStatus');if(el)el.textContent=text});
    node.mediaUrl=result.url;node.uploadId=result.uploadId;node.mediaId='';if(node.previewObjectUrl){URL.revokeObjectURL(node.previewObjectUrl);node.previewObjectUrl='';}renderMemberEditor(approved);
-   msg('Round '+(idx+1)+' image saved. Add the cleared media assignment before publishing.');
+   msg('Round '+(idx+1)+' image uploaded successfully.');
   }catch(error){msg(error.message||'Round image upload failed.')}
  };
  $('#roundSeconds').oninput=e=>{node.preview_seconds=Number(e.target.value);$('#roundSecondsLabel').textContent=e.target.value+' sec'};
