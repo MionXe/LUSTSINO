@@ -75,17 +75,19 @@ Deno.serve(async (request:Request) => {
     const client=s3();
     if(action==="presign"){
       const type=String(payload?.type||""),bytes=Number(payload?.size);
-      const rights=String(payload?.rightsRef||"").trim().slice(0,200);
+      const submittedRef=String(payload?.rightsRef||"").trim().slice(0,200);
       const ext=mimeExtensions[type],limit=type.startsWith("video/")?52428800:20971520;
       if(!ext || !Number.isInteger(bytes) || bytes<1 || bytes>limit)
         return response(origin,{error:"Unsupported format or file exceeds the upload limit"},400);
-      if(rights.length<3)return response(origin,{error:"Supply the written permission reference"},400);
+
       const since=new Date(Date.now()-86400000).toISOString();
       const {count,error:quotaError}=await db.from("bunny_media_uploads").select("id",{count:"exact",head:true})
         .eq("uploader_id",user.id).gte("created_at",since);
       if(quotaError)throw quotaError;
       if((count||0)>=24)return response(origin,{error:"Daily upload allowance reached"},429);
       const id=crypto.randomUUID(),key="incoming/"+user.id+"/"+id+"."+ext;
+      // Internal upload tracking ID; not a substitute for proof of rights or consent.
+      const rights=submittedRef.length>=3?submittedRef:"upload:"+id;
       const {error:insertError}=await db.from("bunny_media_uploads").insert({
         id,uploader_id:user.id,object_key:key,mime_type:type,
         expected_bytes:bytes,rights_ref:rights,status:"issued"
@@ -112,7 +114,7 @@ Deno.serve(async (request:Request) => {
       }).eq("id",id).eq("uploader_id",user.id);
       if(updateError)throw updateError;
       return response(origin,{uploadId:id,status:"uploaded",objectKey:record.object_key,
-        url,deliveryReady:!!url});
+        url,rightsRef:record.rights_ref,deliveryReady:!!url});
     }
     if(action==="cdn-check"){
       if(!admin)return response(origin,{error:"Master access required"},403);
