@@ -107,7 +107,7 @@ function music(){const el=$('#ambientMusic'),button=$('#musicToggle');if(!el||!b
  async function play(){try{await el.play()}catch(e){button.title='Tap to enable music: '+String(e.message||'blocked')}update()}
  $('#ageAccept')?.addEventListener('click',()=>{if($('#ageTermsCheck')?.checked)void play()});
  button.addEventListener('click',()=>{if(el.paused){muted=false;el.muted=false;localStorage.setItem(mute,'no');void play()}else{el.muted=!el.muted;localStorage.setItem(mute,el.muted?'yes':'no');update()}});
- const wrapper=document.createElement('div');wrapper.className='music-credit';wrapper.innerHTML='<span>SOUNDTRACK</span> Music by <a href="https://pixabay.com/users/saavane-32312792/" target="_blank" rel="noopener">saavane</a> · Pixabay <label>Volume <input id="ambientVolume" type="range" min="0" max="100" value="'+Math.round(el.volume*100)+'" aria-label="Soundtrack volume"></label>';
+ const wrapper=document.createElement('div');wrapper.className='music-credit';wrapper.innerHTML='<span>SOUNDTRACK</span> <span id="defaultMusicAttribution">Music by <a href="https://pixabay.com/users/saavane-32312792/" target="_blank" rel="noopener">saavane</a> · Pixabay</span> <label>Volume <input id="ambientVolume" type="range" min="0" max="100" value="'+Math.round(el.volume*100)+'" aria-label="Soundtrack volume"></label>';
  $('#view-home .page-wrap')?.appendChild(wrapper);
  $('#ambientVolume')?.addEventListener('input',e=>{el.volume=Number(e.target.value)/100;localStorage.setItem(key,el.volume)});
  update();

@@ -10,8 +10,10 @@ const cleanTags=s=>[...new Set(String(s||'').toLowerCase().split(/[\s,#]+/).map(
 const safeUrl=s=>{try{const u=new URL(s);return u.protocol==='https:'?u.href:''}catch{return ''}};
 const policyVersion='2026-11-17';
 let viewer=null,profile=null,selectedPost=null,gameRun=null,feedPosts=[],chosenGameType='hotspots';
-let newGame={type:'hotspots',title:'',description:'',tags:[],nodes:[],currentNode:0,mediaId:''};
-const initNode=i=>({round:i+1,title:`Round ${i+1}`,subtitle:'Choose one numbered spot. Follow only the region you selected.',mediaId:'',preview_seconds:5,spots:[{label:'A',x:35,y:45,w:20,h:18,shape:'oval',next:`round_${String(i+2).padStart(2,'0')}`},{label:'B',x:67,y:65,w:15,h:20,shape:'oval',next:`round_${String(i+2).padStart(2,'0')}`}]});
+let feedOffset=0,feedHasMore=true,feedLoading=false,feedObserver=null,feedMoreObserver=null;
+let newGame={type:'hotspots',title:'',description:'',tags:[],nodes:[],currentNode:0,mediaId:'',outcomes:{}};
+let gameFormDraft={title:'',description:'',tags:'',cover_url:'',rights_ref:''};
+const initNode=i=>({round:i+1,title:`Round ${i+1}`,subtitle:'Choose one numbered spot. Follow only the region you selected.',mediaId:'',mediaUrl:'',preview_seconds:5,spots:[{label:'A',x:35,y:45,w:20,h:18,shape:'oval',next:`round_${String(i+2).padStart(2,'0')}`},{label:'B',x:67,y:65,w:15,h:20,shape:'oval',next:`round_${String(i+2).padStart(2,'0')}`}]});
 
 function init(){
  const gate=$('#ageGate'),accept=$('#ageAccept'),check=$('#ageTermsCheck');
@@ -23,12 +25,26 @@ function init(){
  $all('[data-route="search"]').forEach(b=>b.addEventListener('click',()=>setTimeout(renderSearch,20)));
  document.addEventListener('click',e=>{const f=e.target.closest('[data-route="feed"]');if(f)setTimeout(loadFeed,20);const r=e.target.closest('[data-route="community"]');if(r)setTimeout(renderCommunity,20)});
  const search=$('#communitySearch');search?.addEventListener('input',renderSearch);
- newGame.nodes=[initNode(0),initNode(1),{round:3,title:'Final reveal',subtitle:'Your surprise',mediaId:'',seconds:15,spots:[]}];
+ $('#feedRefresh')?.addEventListener('click',()=>loadFeed());
+ $('#feedCompose')?.addEventListener('click',()=>setTimeout(()=>{renderCommunity();const panel=$('#communityPanel');panel?.querySelectorAll('.member-tool-tabs [data-tool]').forEach(t=>t.classList.toggle('active',t.dataset.tool==='post'));renderTool('post')},50));
+ const refreshNotice=document.createElement('button');
+ refreshNotice.type='button';refreshNotice.className='feed-new-notice button secondary';
+ refreshNotice.textContent='✦ New posts · refresh feed';
+ refreshNotice.hidden=true;refreshNotice.onclick=()=>{refreshNotice.hidden=true;loadFeed()};
+ $('#view-feed .feed-toolbar')?.appendChild(refreshNotice);
+ setInterval(async()=>{
+  if(!db()||!feedPosts.length||!$('#view-feed')?.classList.contains('show')||document.hidden)return;
+  const {data,error}=await db().from('community_posts').select('id').eq('published',true)
+    .eq('review_status','approved').order('created_at',{ascending:false}).limit(1);
+  if(!error&&data?.[0]&&data[0].id!==feedPosts[0]?.id)refreshNotice.hidden=false;
+ },60000);
+ document.addEventListener('visibilitychange',()=>{if(document.hidden)$all('#communityFeed video').forEach(v=>v.pause())});
+ newGame.nodes=[initNode(0),initNode(1),{round:3,title:'Final reveal',subtitle:'Your surprise',mediaId:'',mediaUrl:'',seconds:15,spots:[]}];
  setTimeout(ready,500);
 }
 let attempts=0;async function ready(){if(!db()){if(++attempts<24)setTimeout(ready,1200);return}const client=db();client.auth.onAuthStateChange((event)=>{setTimeout(loadIdentity,100);if(event==='PASSWORD_RECOVERY')setTimeout(showPasswordRecovery,250)});await loadIdentity();if(core()?.state?.route==='feed')await loadFeed();}
 async function loadIdentity(){const client=db();if(!client)return;const {data:{user},error}=await client.auth.getUser();viewer=error?null:user;profile=null;if(viewer){const {data:p}=await client.from('member_profiles').select('*').eq('user_id',viewer.id).maybeSingle();profile=p;if(p&&sessionStorage.getItem('lustsino_pending_terms')==='yes'){const {error:termsError}=await client.rpc('accept_lustsino_terms',{p_version:policyVersion});if(!termsError){sessionStorage.removeItem('lustsino_pending_terms');profile={...p,terms_version:policyVersion}}}}
- if(core()?.state?.route==='account')renderAccount();if(core()?.state?.route==='community')renderCommunity();}
+ if(core()?.state?.route==='account')renderAccount();if(core()?.state?.route==='community'&&$('#communityPanel')?.dataset.viewerId!==viewer?.id)renderCommunity();}
 
 function showPasswordRecovery(){const root=$('#memberPanel');if(!root||!db())return;core()?.state?.route!=='account'&&document.querySelector('[data-route="account"]')?.click();setTimeout(()=>{const el=$('#memberPanel');if(!el)return;el.insertAdjacentHTML('afterbegin',`<section class="member-card" id="recoveryPanel"><h2>Set a new password</h2><form id="changePassword"><label>New password<input name="password" type="password" autocomplete="new-password" minlength="12" required></label><label>Confirm password<input name="confirm" type="password" autocomplete="new-password" minlength="12" required></label><button class="button primary">Update password</button></form></section>`);$('#changePassword').onsubmit=async e=>{e.preventDefault();const f=new FormData(e.target);if(f.get('password')!==f.get('confirm'))return msg('Passwords do not match.');const {error}=await db().auth.updateUser({password:String(f.get('password'))});if(error)return msg(error.message);$('#recoveryPanel')?.remove();msg('Password updated.')};},300)}
 function validPlayerEmail(s){return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(s||'').trim())}
@@ -70,8 +86,56 @@ async function renderCreatorUpgrade(){const root=$('#creatorUpgrade');if(!root||
  $('#creatorApplication').onsubmit=async e=>{e.preventDefault();const f=new FormData(e.target);const rawUrl=String(f.get('portfolio_url')||'').trim();const url=rawUrl?safeUrl(rawUrl):null;if(rawUrl&&!url)return msg('Enter a valid HTTPS URL or leave it blank.');const {error}=await db().from('creator_applications').insert({user_id:viewer.id,portfolio_url:url,note:String(f.get('note')||'').slice(0,1000)});if(error)return msg(error.message);msg('Creator application submitted.');renderCreatorUpgrade()};
 }
 function renderSearch(){const root=$('#searchResults');if(!root)return;const q=($('#communitySearch')?.value||'').trim().replace(/^#/,'').toLowerCase(),games=(core()?.state?.experiences||[]).filter(g=>g.published!==false);const matches=games.filter(g=>!q||[g.title,g.description,g.type,...(g.tags||[])].join(' ').toLowerCase().includes(q));root.innerHTML=matches.map(g=>`<button class="search-card" data-start="${esc(g.id)}"><img src="assets/covers/${['wheel','cards','hotspots','duel','prompts','doors','tiles'].includes(g.type)?g.type:'wheel'}.webp" alt="" loading="lazy"><strong>${esc(g.title)}</strong><small>${esc(g.description||g.type)}</small><span>${(g.tags||[]).map(t=>'#'+esc(t)).join(' ')}</span></button>`).join('')||'<p>No matching games yet.</p>';const tags=[...new Set(games.flatMap(g=>g.tags||[]))].slice(0,15);$('#trendingTags').innerHTML=tags.map(t=>`<button class="tag-chip" data-tag="${esc(t)}">#${esc(t)}</button>`).join('')||'<span class="micro-note">New tags appear as creators publish their games.</span>';$all('[data-tag]',$('#trendingTags')).forEach(b=>b.onclick=()=>{$('#communitySearch').value=b.dataset.tag;renderSearch()})}
-async function loadFeed(){const root=$('#communityFeed');if(!root)return;root.innerHTML='<div class="feed-message">Loading published creator posts…</div>';const client=db();if(!client){root.innerHTML='<div class="feed-message">Connect Supabase to load moderated community posts.</div>';return}const {data,error}=await client.from('community_posts').select('id,title,description,creator_credit,source_url,media_url,media_type,tags,created_at,owner_id').eq('published',true).eq('review_status','approved').order('created_at',{ascending:false}).limit(45);if(error){root.innerHTML=`<p>${esc(error.message)}</p>`;return}feedPosts=data||[];if(!feedPosts.length){root.innerHTML=`<div class="feed-empty"><img src="assets/covers/doors.webp" alt=""><div><h2>Creator spotlight starts here.</h2><p>No public posts yet. Verified House Creators can upload and publish their own authorized Bunny media immediately.</p><button class="button primary" data-route="community">Submit a post ↗</button></div></div>`;return}
- root.innerHTML=feedPosts.map((p,i)=>`<article class="feed-reel" data-reel="${i}" aria-label="Media post ${i+1}"><div class="feed-stage">${p.media_type==='video'?`<video src="${esc(safeUrl(p.media_url))}" preload="none" playsinline controls></video>`:`<img src="${esc(safeUrl(p.media_url))}" alt="${esc(p.title)}" loading="lazy">`}</div><div class="feed-meta"><span class="overline">${i+1} / ${feedPosts.length} · CREATOR DISCOVERY</span><h2>${esc(p.title)}</h2><p>${esc(p.description||'')}</p><p class="feed-credit">${esc(p.creator_credit||'Creator credited')}</p><div class="tag-list">${(p.tags||[]).map(t=>`<button class="tag-chip" data-feed-tag="${esc(t)}">#${esc(t)}</button>`).join('')}</div><div class="reel-actions"><button class="reel-like" data-like="${esc(p.id)}" aria-label="Like post">♡<small>Like</small></button><button data-share="${esc(p.id)}" aria-label="Share post">↗<small>Share</small></button><button data-report-post="${esc(p.id)}" aria-label="Report post">⚑<small>Report</small></button>${safeUrl(p.source_url)?`<a href="${esc(safeUrl(p.source_url))}" target="_blank" rel="noopener noreferrer">✦<small>Creator</small></a>`:''}</div></div></article>`).join('');
+async function loadFeed({append=false}={}){
+ const root=$('#communityFeed'),pager=$('#feedPagination');if(!root||!db()||feedLoading)return;
+ feedLoading=true;
+ if(!append){$('#view-feed .feed-new-notice')?.setAttribute('hidden','');feedOffset=0;feedHasMore=true;feedPosts=[];feedObserver?.disconnect();feedMoreObserver?.disconnect();root.innerHTML='<div class="feed-message">Loading the latest posts…</div>';}
+ const pageSize=24;
+ const {data,error}=await db().from('community_posts')
+  .select('id,title,description,creator_credit,source_url,media_url,media_type,tags,created_at,owner_id')
+  .eq('published',true).eq('review_status','approved')
+  .order('created_at',{ascending:false}).range(feedOffset,feedOffset+pageSize-1);
+ feedLoading=false;
+ if(error){if(!append)root.innerHTML='<p class="feed-message">'+esc(error.message)+'</p>';return}
+ const rows=data||[];
+ feedPosts=append?feedPosts.concat(rows):rows;
+ feedOffset+=rows.length;
+ feedHasMore=rows.length===pageSize;
+ if(!feedPosts.length){
+  root.innerHTML='<div class="feed-empty"><img src="assets/covers/doors.webp" alt=""><div><h2>Your feed starts here</h2><p>No creator posts yet. Be the first to share an authorized image, GIF or short video.</p><button class="button primary" data-route="community">＋ Create post</button></div></div>';
+  if(pager)pager.innerHTML='';return;
+ }
+ const markup=rows.map((p,i)=>{
+  const url=safeUrl(p.media_url),posted=p.created_at?new Date(p.created_at).toLocaleDateString():'';const artist=p.creator_credit||'Creator';
+  return '<article class="feed-reel" data-reel="'+esc(p.id)+'" aria-label="'+esc(p.title)+'">'+
+    '<header class="feed-post-header"><span class="feed-avatar">✦</span><div class="feed-post-by"><strong>'+esc(artist)+'</strong><small>'+esc(posted)+'</small></div><button class="feed-post-more" data-report-post="'+esc(p.id)+'" aria-label="Report this post">•••</button></header>'+
+    '<div class="feed-stage">'+(p.media_type==='video'?
+      '<video src="'+esc(url)+'" preload="metadata" muted playsinline loop controls></video>':
+      '<img src="'+esc(url)+'" alt="'+esc(p.title)+'" loading="lazy">')+'</div>'+
+    '<div class="feed-actions"><button type="button" class="reel-like" data-like="'+esc(p.id)+'" aria-label="Like">♡ <span>Like</span></button>'+
+     '<button type="button" data-share="'+esc(p.id)+'" aria-label="Share">↗ <span>Share</span></button>'+
+     '<button type="button" data-report-post="'+esc(p.id)+'" aria-label="Report">⚑ <span>Report</span></button>'+
+     (safeUrl(p.source_url)?'<a href="'+esc(safeUrl(p.source_url))+'" target="_blank" rel="noopener noreferrer">✦ Creator page</a>':'')+'</div>'+
+    '<div class="feed-meta"><p class="feed-caption"><strong>'+esc(artist)+'</strong> '+esc(p.title)+'</p>'+
+    (p.description?'<p>'+esc(p.description)+'</p>':'')+
+    '<div class="tag-list">'+(p.tags||[]).map(tag=>'<button class="tag-chip" data-feed-tag="'+esc(tag)+'">#'+esc(tag)+'</button>').join('')+'</div></div></article>';
+ }).join('');
+ if(append)root.insertAdjacentHTML('beforeend',markup);else root.innerHTML=markup;
+ if(pager){
+  pager.innerHTML=feedHasMore?'<button type="button" class="button secondary" id="feedLoadMore">Load more posts ↓</button>':
+   '<p class="feed-end">You’re all caught up.</p>';
+  const more=$('#feedLoadMore');
+  if(more){
+   more.onclick=()=>loadFeed({append:true});
+   if('IntersectionObserver' in window){
+    if(!feedMoreObserver)feedMoreObserver=new IntersectionObserver(entries=>{
+     if(entries.some(x=>x.isIntersecting)&&!feedLoading&&feedHasMore&&$('#view-feed')?.classList.contains('show'))
+      loadFeed({append:true});
+    },{rootMargin:'400px 0px',threshold:0});
+    feedMoreObserver.disconnect();feedMoreObserver.observe(more);
+   }
+  }
+ }
  $all('[data-like]',root).forEach(b=>b.onclick=()=>toggleLike(b));
  $all('[data-report-post]',root).forEach(button=>button.onclick=()=>{
   const postId=button.dataset.reportPost;
@@ -94,7 +158,18 @@ async function loadFeed(){const root=$('#communityFeed');if(!root)return;root.in
   };
   dialog.showModal();
  });
-$all('[data-share]',root).forEach(b=>b.onclick=()=>{const url=location.origin+location.pathname+'#feed';navigator.share?.({title:'LUSTSINO',url}).catch(()=>{})||navigator.clipboard?.writeText(url).then(()=>msg('Feed link copied'))});$all('[data-feed-tag]',root).forEach(b=>b.onclick=()=>{core().state.route='search';$('[data-route="search"]')?.click();$('#communitySearch').value=b.dataset.feedTag;renderSearch()})}
+$all('[data-share]',root).forEach(b=>b.onclick=()=>{const url=location.origin+location.pathname+'#feed';navigator.share?.({title:'LUSTSINO',url}).catch(()=>{})||navigator.clipboard?.writeText(url).then(()=>msg('Feed link copied'))});$all('[data-feed-tag]',root).forEach(b=>b.onclick=()=>{core().state.route='search';$('[data-route="search"]')?.click();$('#communitySearch').value=b.dataset.feedTag;renderSearch()});
+ feedObserver?.disconnect();
+ feedObserver=new IntersectionObserver(entries=>{
+  entries.forEach(entry=>{
+   const video=entry.target;
+   if(document.hidden || !$('#view-feed')?.classList.contains('show') || entry.intersectionRatio<.60){video.pause();return}
+   video.muted=true;video.playsInline=true;
+   video.play().catch(()=>{});
+  });
+ },{threshold:[0,.25,.60,.9]});
+ $all('.feed-stage video',root).forEach(video=>feedObserver.observe(video));
+}
 async function toggleLike(b){if(!viewer)return msg('Sign in with a player account to save reactions.');const post_id=b.dataset.like;const {data}=await db().from('post_reactions').select('post_id').eq('post_id',post_id).eq('user_id',viewer.id).maybeSingle();let result;if(data){result=await db().from('post_reactions').delete().eq('user_id',viewer.id).eq('post_id',post_id)}else{result=await db().from('post_reactions').insert({post_id,user_id:viewer.id})}if(result.error)return msg(result.error.message);b.classList.toggle('active',!data);b.firstChild.textContent=data?'♡':'♥'}
 async function loadLeaderboard(){
  const root=$('#leaderboardPanel');if(!root)return;root.innerHTML='<p>Opening the Hall of Fame…</p>';
@@ -106,71 +181,166 @@ async function loadLeaderboard(){
 }
 function ensureGate(){if(!viewer)return 'Sign in to publish content or build games.';if(profile?.terms_version!==policyVersion)return 'Your account must accept the latest Terms. Sign out and sign in again after accepting.';return ''}
 function renderCommunity(){let root=$('#communityPanel');if(!root)return;const warning=ensureGate();if(warning){root.innerHTML=`<div class="member-card"><h2>Member Studio</h2><p>${esc(warning)}</p><button class="button primary" data-route="account">Go to account ↗</button></div>`;return}
- root.innerHTML=`<div class="member-tool-tabs"><button class="active" data-tool="post">Submit a post</button><button data-tool="game">Create a game</button><button data-tool="mine">My drafts</button>${core()?.admin?'<button data-tool="review">Moderate</button>':''}</div><div id="memberToolBody"></div>`;$all('[data-tool]',root).forEach(b=>b.onclick=()=>{$all('[data-tool]',root).forEach(x=>x.classList.toggle('active',x===b));renderTool(b.dataset.tool)});renderTool('post')}
-function renderTool(tool){if(tool==='post')renderPostTool();else if(tool==='game')renderGameTool();else if(tool==='mine')renderMyDrafts();else if(tool==='review')renderReviewTool()}
-function renderPostTool(){const root=$('#memberToolBody');root.innerHTML=`<div class="member-card"><span class="overline">POST TO THE VELVET FEED</span><h2>Submit authorized media</h2><p>Verified House Creators can publish their own Bunny uploads to the feed immediately. Other players can save a private submission while creator verification is completed. Content rights and consent are required.</p><form id="submitPost" class="stack-form"><label>Title<input name="title" required maxlength="140"></label><label>Description<textarea name="description" maxlength="1000"></textarea></label><input type="hidden" name="media_type" value="image"><label>Media link (filled after upload)<input id="mediaRemoteURL" type="url" name="media_url" placeholder="https://approved-host.example/file.webp"></label><label>Choose an image, GIF, or short video<input id="uploadCandidate" type="file" accept="image/webp,image/png,image/jpeg,image/gif,video/mp4,video/webm"></label><div id="uploadPreview" class="micro-note">Add your permission reference, select media, and upload to Bunny. An upload alone does not publish the content.</div><button id="sendToStorage" class="button subtle" type="button" disabled>Upload to Bunny</button><label>Creator credit<input name="creator_credit" required maxlength="120"></label><label>Creator page (optional)<input name="source_url" type="url" placeholder="https://..."></label><label>Written permission reference<input name="rights_reference" required minlength="3" maxlength="200"></label><label>Tags<input name="tags" placeholder="editorial, cosplay, creative" maxlength="160"></label><label class="check-row"><input name="permission" type="checkbox" required> I have permission to submit this content, and the depicted adults are verified with documented consent.</label><button class="button primary" type="submit">Publish / save post ↗</button></form></div>`;
- const f=$('#uploadCandidate'),preview=$('#uploadPreview'),send=$('#sendToStorage');f.onchange=()=>{const file=f.files[0];if(!file)return;const obj=URL.createObjectURL(file);preview.innerHTML=`<p>Preview only · ${esc(file.name)} (${Math.round(file.size/1024)} KB)</p>${file.type.startsWith('image/')?`<img style="max-width:180px;max-height:220px;border-radius:12px" src="${obj}" alt="Local preview">`:`<video style="max-width:180px" controls src="${obj}"></video>`}`;send.disabled=!window.VYRA_CONFIG?.uploadEndpoint};send.onclick=async()=>{
- const endpoint=window.VYRA_CONFIG?.uploadEndpoint,file=f.files[0];
- if(!endpoint||!file)return msg("Choose a file first.");
- const {data:{session}}=await db().auth.getSession();
- if(!session)return msg("Please sign in before uploading.");
- const rightsRef=String($('#submitPost [name="rights_reference"]')?.value||"").trim();
- if(rightsRef.length<3)return msg("Enter the written permission reference before uploading.");
- send.disabled=true;send.textContent="Preparing upload…";
- try {
-  let upload=file;
-  if(["image/jpeg","image/png","image/webp"].includes(file.type)&&file.size<20000000){
-   try{const bitmap=await createImageBitmap(file),scale=Math.min(1,1600/Math.max(bitmap.width,bitmap.height)),canvas=document.createElement("canvas");canvas.width=Math.round(bitmap.width*scale);canvas.height=Math.round(bitmap.height*scale);canvas.getContext("2d").drawImage(bitmap,0,0,canvas.width,canvas.height);const converted=await new Promise(resolve=>canvas.toBlob(resolve,"image/webp",.85));bitmap.close();if(converted)upload=new File([converted],file.name.replace(/\.[^.]+$/,"")+".webp",{type:"image/webp"})}catch{}
-  }
-  const post=async payload=>{
-   const response=await fetch(endpoint,{method:"POST",headers:{"Content-Type":"application/json",Authorization:"Bearer "+session.access_token,apikey:window.VYRA_CONFIG.supabaseAnonKey},body:JSON.stringify(payload)});
-   const data=await response.json().catch(()=>({}));
-   if(!response.ok)throw Error(data.error||("Storage request failed ("+response.status+")"));
-   return data;
-  };
-  const grant=await post({action:"presign",type:upload.type,size:upload.size,rightsRef});
-  send.textContent="Uploading to Bunny…";
-  const uploaded=await fetch(grant.uploadUrl,{method:"PUT",headers:{"Content-Type":grant.contentType},body:upload});
-  if(!uploaded.ok)throw Error("Bunny rejected the file ("+uploaded.status+"). Check your S3 zone's CORS settings.");
-  send.textContent="Confirming upload…";
-  const result=await post({action:"finalize",uploadId:grant.uploadId});
-  if(result.url){
-   $('#mediaRemoteURL').value=result.url;
-   msg("Bunny upload complete. Add the caption and attribution, then publish if verified.");
-  } else msg("File stored. The Bunny CDN Pull Zone must be connected before it can be shown on the site.");
- }catch(error){msg(error.message||"Upload failed.")}
- finally{send.disabled=false;send.textContent="Upload to Bunny";}
+ if(root.dataset.viewerId===viewer?.id&&$('#memberToolBody',root))return;
+ root.dataset.viewerId=viewer.id;
+ root.innerHTML=`<div class="member-tool-tabs"><button class="active" data-tool="post">Create post</button><button data-tool="game">Build a game</button><button data-tool="mine">My drafts</button>${core()?.admin?'<button data-tool="review">Moderate</button>':''}</div><div id="memberToolBody"></div>`;$all('[data-tool]',root).forEach(b=>b.onclick=()=>{$all('[data-tool]',root).forEach(x=>x.classList.toggle('active',x===b));renderTool(b.dataset.tool)});renderTool('post')}
+function captureGameForm(){
+ const form=$('#submitGame');if(!form)return;
+ for(const key of ['title','description','tags']){const input=form.elements.namedItem(key);if(input)gameFormDraft[key]=input.value}
+ const rights=$('#gameRights');if(rights)gameFormDraft.rights_ref=rights.value;
 }
+function renderTool(tool){
+ captureGameForm();
+ if(tool==='post')renderPostTool();
+ else if(tool==='game')renderGameTool();
+ else if(tool==='mine')renderMyDrafts();
+ else if(tool==='review')renderReviewTool();
+}
+function renderPostTool(){
+ const root=$('#memberToolBody');if(!root)return;
+ root.innerHTML='<div class="member-card member-compose"><span class="overline">CREATE FOR THE FEED</span><h2>Share a moment</h2>'+
+  '<p>Choose a file, write a caption and press Publish. We handle storage automatically. Verified House Creators can publish eligible media immediately; other submissions remain private drafts.</p>'+
+  '<form id="submitPost" class="stack-form">'+
+   '<label>Photo, animated GIF or short video<input id="uploadCandidate" type="file" accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm"></label>'+
+   '<div id="uploadPreview" class="compose-preview">Choose a file to preview it.</div>'+
+   '<details class="compose-existing"><summary>Already uploaded this file? Use its URL</summary><label>Existing Bunny media URL<input id="mediaRemoteURL" name="media_url" type="url" placeholder="https://your-pull-zone.b-cdn.net/..."></label></details>'+
+   '<label>Post title<input name="title" required maxlength="140" placeholder="Give your post a title"></label>'+
+   '<label>Caption<textarea name="description" maxlength="1000" rows="3" placeholder="Tell visitors about this post…"></textarea></label>'+
+   '<div class="compose-two"><label>Creator credit<input name="creator_credit" required maxlength="120" placeholder="Your creator name"></label>'+
+   '<label>Creator page (optional)<input name="source_url" type="url" placeholder="https://..."></label></div>'+
+   '<label>Tags<input name="tags" placeholder="portraits, game, reveal"></label>'+
+   '<label>Written permission / rights reference<input name="rights_reference" required minlength="3" maxlength="200" placeholder="Release or creator permission ID"></label>'+
+   '<label class="check-row"><input name="permission" type="checkbox" required> I own this media or have documented permission from verified adult participants to submit it.</label>'+
+   '<p id="postProgress" aria-live="polite" class="micro-note"></p>'+
+   '<button class="button primary compose-publish" type="submit">Publish post ↗</button>'+
+  '</form></div>';
+ const fileInput=$('#uploadCandidate'),preview=$('#uploadPreview');
+ let previewObject=null;
+ fileInput.onchange=()=>{
+  if(previewObject)URL.revokeObjectURL(previewObject);
+  const file=fileInput.files?.[0];if(!file){preview.textContent='Choose an image, GIF or short video.';return}
+  previewObject=URL.createObjectURL(file);
+  const media=file.type.startsWith('video/')?
+    '<video controls playsinline muted src="'+esc(previewObject)+'"></video>':
+    '<img src="'+esc(previewObject)+'" alt="Your new post preview">';
+  preview.innerHTML=media+'<small>'+esc(file.name)+' · '+(file.size/(1024*1024)).toFixed(2)+' MB</small>';
+ };
  $('#submitPost').onsubmit=async e=>{
   e.preventDefault();
-  const fd=new FormData(e.target);
-  const media_url=safeUrl(fd.get('media_url'));
-  const rawSource=String(fd.get('source_url')||'').trim();
-  const source_url=rawSource?safeUrl(rawSource):null;
-  if(!media_url||(rawSource&&!source_url))return msg('Provide a valid HTTPS media URL. Creator page links are optional.');
-  if(!fd.get('permission'))return msg('Confirm documented permission and consent first.');
-  const instant=profile?.creator_status==='verified'||!!core()?.admin;
-  const row={
-   owner_id:viewer.id,title:String(fd.get('title')).trim(),
-   description:String(fd.get('description')||'').trim(),
-   media_type:($('#uploadCandidate')?.files?.[0]?.type.startsWith('video/')||/\.(mp4|webm)(?:[?#]|$)/i.test(media_url))?'video':'image',
-   media_url,source_url,
-   creator_credit:String(fd.get('creator_credit')).trim(),
-   rights_reference:String(fd.get('rights_reference')).trim(),
-   tags:cleanTags(fd.get('tags')),published:instant,review_status:instant?'approved':'draft'
-  };
-  const {error}=await db().from('community_posts').insert(row);
-  if(error){
-   if(instant)return msg('Post not published: '+error.message+'. You must be fully verified, and this must be your completed Bunny upload with a matching rights reference.');
-   return msg(error.message);
-  }
-  e.target.reset();
-  msg(instant?'Published to your feed.':'Saved privately. Public adult-media publishing requires verified House Creator status.');
-  if(instant)setTimeout(()=>document.querySelector('[data-route="feed"]')?.click(),350);
- }
+  const form=e.currentTarget,submit=form.querySelector('[type="submit"]');
+  if(submit.disabled)return;const values=new FormData(form);
+  const rights=String(values.get('rights_reference')||'').trim();
+  const f=fileInput.files?.[0];
+  let url=safeUrl(values.get('media_url'));
+  if(!f&&!url)return msg('Choose a media file or use an existing Bunny URL.');
+  if(!values.get('permission'))return msg('Confirm written permission and age/consent records before saving.');
+  const rawLink=String(values.get('source_url')||'').trim(),source=rawLink?safeUrl(rawLink):null;
+  if(rawLink&&!source)return msg('The optional creator link must be an HTTPS URL.');
+  submit.disabled=true;const status=$('#postProgress');
+  try{
+   if(f){
+    if(!window.LUSTSINO_UPLOAD)throw Error('File uploader is not loaded. Refresh the page.');
+    const result=await window.LUSTSINO_UPLOAD.upload(f,rights,message=>{if(status)status.textContent=message});
+    url=result.url;
+   }
+   const instant=profile?.creator_status==='verified'||!!core()?.admin;
+   const row={
+    owner_id:viewer.id,
+    title:String(values.get('title')||'').trim(),
+    description:String(values.get('description')||'').trim(),
+    media_type:f?(f.type.startsWith('video/')?'video':'image'):/\.(mp4|webm)(?:[?#]|$)/i.test(url)?'video':'image',
+    media_url:url,source_url:source,
+    creator_credit:String(values.get('creator_credit')||'').trim(),
+    rights_reference:rights,tags:cleanTags(values.get('tags')),
+    published:instant,review_status:instant?'approved':'draft'
+   };
+   const {error}=await db().from('community_posts').insert(row);
+   if(error)throw Error(error.message+'. Public publishing requires a verified House Creator and a completed Bunny upload with matching rights reference.');
+   if(previewObject){URL.revokeObjectURL(previewObject);previewObject=null}
+   form.reset();
+   if(status)status.textContent=instant?'Published to the feed.':'Saved as a private draft in your Studio.';
+   if(instant){
+    setTimeout(()=>{document.querySelector('[data-route="feed"]')?.click();setTimeout(()=>loadFeed(),100)},550);
+   }
+   else setTimeout(()=>renderMyDrafts(),700);
+  }catch(error){
+   if(status)status.textContent=error.message||'Publishing failed.';
+   msg(error.message||'Publishing failed.');
+  }finally{submit.disabled=false;}
+ };
 }
-function renderGameTool(){const root=$('#memberToolBody');const approved=core()?.state?.media?.filter(m=>m.published===true)||[];const options=approved.map(m=>`<option value="${esc(m.id)}">${esc(m.name)}</option>`).join('');root.innerHTML=`<div class="member-card"><span class="overline">MEMBER GAME BUILDER</span><h2>Make a new interactive game</h2><p>Choose a mode, add tags and configure its outcomes. All players can save drafts. Verified House Creators publish complete games automatically when every media assignment meets the existing safeguards.</p><form id="submitGame" class="stack-form"><label>Game title<input name="title" maxlength="90" required></label><label>Description<input name="description" maxlength="240" required></label><label>Game mode<select id="memberGameType" name="type">${[['hotspots','Circle Paths'],['wheel','Roulette'],['cards','Shuffle'],['duel','This or That'],['prompts','Timed prompts'],['doors','Mystery Doors'],['tiles','Lucky Tiles'],['special','The LUSTSINO Special']].map(([v,t])=>`<option value="${v}" ${v===chosenGameType?'selected':''}>${t}</option>`).join('')}</select></label><label>Tags (comma or hashtag separated)<input name="tags" placeholder="creative, challenge, arcade"></label><div id="memberGameEditor"></div><button class="button primary" type="submit">Save game draft ↗</button></form></div>`;$('#memberGameType').onchange=e=>{chosenGameType=e.target.value;renderMemberEditor(approved)};renderMemberEditor(approved);
- $('#submitGame').onsubmit=async e=>{e.preventDefault();const form=new FormData(e.target),type=form.get('type'),config=makeGameConfig(type);if(!config)return msg('Complete the configuration first.');const title=String(form.get('title')).trim();const slug='member-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,8);const instant=profile?.creator_status==='verified'||!!core()?.admin;const record={title,slug,description:String(form.get('description')||''),type,author_id:viewer.id,tags:cleanTags(form.get('tags')),published:instant,review_status:instant?'approved':'draft',featured:false,symbol:'◇',sort_order:100,config};let {error}=await db().from('experiences').insert(record);if(error&&instant){const retry=await db().from('experiences').insert({...record,published:false,review_status:'draft'});if(!retry.error){msg('Game saved privately. Public release requires every media and creator record to meet the publishing checks.');e.target.reset();chosenGameType='hotspots';renderGameTool();return;}return msg('Could not save game: '+retry.error.message)}if(error)return msg(error.message);msg(instant?'Game published to the arcade.':'Game draft saved in your Studio.');e.target.reset();chosenGameType='hotspots';renderGameTool()}
+function renderGameTool(){
+ const root=$('#memberToolBody'),approved=core()?.state?.media?.filter(x=>x.published===true)||[];
+ if(!root)return;
+ const modes=[['hotspots','Circle Paths'],['wheel','Roulette'],['cards','Shuffle'],['duel','This or That'],
+  ['prompts','Timed prompts'],['doors','Mystery Doors'],['tiles','Lucky Tiles'],['special','The LUSTSINO Special']];
+ root.innerHTML='<div class="member-card game-maker"><div class="overline">CREATOR WORKSHOP</div><h2>Build your next game</h2>'+
+ '<p>Create your own rounds and add your media. Every player can save private drafts. Verified House Creators publish games once their media assignments meet the publishing checks.</p>'+
+ '<form id="submitGame" class="stack-form">'+
+ '<div class="game-maker-grid">'+
+ '<label>Game title<input name="title" maxlength="90" required placeholder="Give your game a name" value="'+esc(gameFormDraft.title)+'"></label>'+
+ '<label>Game mode<select id="memberGameType" name="type">'+modes.map(([v,t])=>'<option value="'+v+'"'+(v===chosenGameType?' selected':'')+'>'+t+'</option>').join('')+'</select></label>'+
+ '<label class="game-wide">Description<input name="description" maxlength="240" required placeholder="What makes it fun?" value="'+esc(gameFormDraft.description)+'"></label>'+
+ '<label>Hashtags<input name="tags" placeholder="game,roulette,creative" value="'+esc(gameFormDraft.tags)+'"></label>'+
+ '<label>Media permission / rights reference<input id="gameRights" name="rights_ref" maxlength="200" placeholder="Required for new uploads" value="'+esc(gameFormDraft.rights_ref)+'"></label>'+
+ '</div>'+
+ '<div class="game-cover-editor"><div><h3>Game cover</h3><p>Choose a JPEG, WebP, PNG or GIF for your game icon and preview.</p>'+
+ '<input type="file" id="gameCoverFile" accept="image/jpeg,image/png,image/webp,image/gif"></div>'+
+ '<div id="gameCoverPreview">'+(gameFormDraft.cover_url?'<img src="'+esc(gameFormDraft.cover_url)+'" alt="Current game cover">':'<span>✦ Cover preview</span>')+'</div></div>'+
+ '<div id="memberGameEditor"></div>'+
+ '<div class="game-maker-actions"><p id="gameSaveStatus" role="status" aria-live="polite"></p>'+
+ '<button type="button" class="button secondary" id="gamePreviewBtn">Preview game</button>'+
+ '<button class="button primary" type="submit">Publish / save game ↗</button></div></form></div>';
+ for(const field of ['title','description','tags'])root.querySelector('[name="'+field+'"]').oninput=captureGameForm;
+ $('#gameRights').oninput=captureGameForm;
+ $('#memberGameType').onchange=e=>{captureGameForm();chosenGameType=e.target.value;renderMemberEditor(approved)};
+ $('#gameCoverFile').onchange=e=>{
+  const f=e.target.files?.[0];if(!f)return;
+  const src=URL.createObjectURL(f);const preview=$('#gameCoverPreview');
+  preview.innerHTML='<img src="'+esc(src)+'" alt="Selected game cover">';
+ };
+ renderMemberEditor(approved);
+ $('#gamePreviewBtn').onclick=()=>{
+  captureGameForm();
+  const cfg=makeGameConfig(chosenGameType);
+  if(!cfg)return msg('Complete this game mode first.');
+  core()?.startGame?.({id:'preview-'+Date.now(),title:gameFormDraft.title||'Your preview',
+   description:gameFormDraft.description||'',type:chosenGameType,
+   config:cfg,slug:'draft-preview',published:false,review_status:'draft'});
+ };
+ $('#submitGame').onsubmit=async event=>{
+  event.preventDefault();captureGameForm();
+  const form=event.currentTarget,submit=form.querySelector('[type="submit"]');
+  if(submit.disabled)return;
+  const type=chosenGameType,config=makeGameConfig(type);
+  if(!config)return msg('Complete your game configuration first.');
+  const name=gameFormDraft.title.trim();if(!name)return msg('Enter a game title.');
+  submit.disabled=true;const info=$('#gameSaveStatus');
+  try {
+   const file=$('#gameCoverFile')?.files?.[0];
+   if(file){
+    if(!window.LUSTSINO_UPLOAD)throw Error('Uploader unavailable; refresh the site.');
+    const uploaded=await window.LUSTSINO_UPLOAD.upload(file,gameFormDraft.rights_ref,text=>info.textContent=text);
+    gameFormDraft.cover_url=uploaded.url;
+   }
+   const instant=profile?.creator_status==='verified'||!!core()?.admin;
+   const payload={title:name,slug:'member-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,8),
+    description:gameFormDraft.description.trim(),type,author_id:viewer.id,tags:cleanTags(gameFormDraft.tags),
+    cover_url:gameFormDraft.cover_url||null,published:instant,review_status:instant?'approved':'draft',
+    featured:false,symbol:'◇',sort_order:100,config};
+   let {error}=await db().from('experiences').insert(payload);
+   let published=instant;
+   if(error&&instant){
+    const retry=await db().from('experiences').insert({...payload,published:false,review_status:'draft'});
+    if(retry.error)throw retry.error;
+    published=false;
+   }else if(error)throw error;
+   if(info)info.textContent=published?'Game published!':'Saved as a private draft. Media assets must be cleared before public release.';
+   if(published){await core().refreshRemote();document.querySelector('[data-route="games"]')?.click();}
+   else setTimeout(()=>renderMyDrafts(),700);
+  }catch(error){if(info)info.textContent=error.message||'Game could not be saved.';msg(error.message||'Game could not be saved.')}
+  finally{submit.disabled=false;}
+ };
 }
 function makeGameConfig(type){
  if(type==='special'){
@@ -190,45 +360,198 @@ function makeGameConfig(type){
           voice,lockMediaAssignments:true,rotateMedia:false};
  }
  if(type==='hotspots'){if(newGame.nodes.length<2)return null;const nodes={};newGame.nodes.forEach((n,i)=>nodes['round_'+String(i+1).padStart(2,'0')]=JSON.parse(JSON.stringify(n)));return {nodes,startNode:'round_01',totalRounds:newGame.nodes.length-1,lockMediaAssignments:true,rotateMedia:false}}
- const c=[];$all('.outcome-row').forEach((row,i)=>{const label=$('[data-outcome-label]',row)?.value||'Mystery '+(i+1),mediaId=$('[data-outcome-media]',row)?.value||'';c.push({label,mediaId,seconds:15,prompt:label})});if(type==='wheel')return{slices:c};if(type==='duel')return{choices:c,rounds:5};if(type==='prompts')return{choices:c,rounds:5};return{choices:c}}
-function renderMemberEditor(approved){const root=$('#memberGameEditor');if(!root)return;
+ const choices=(newGame.outcomes?.[type]||[]).map((entry,i)=>({
+  label:entry.label||'Choice '+(i+1),mediaId:entry.mediaId||'',mediaUrl:entry.mediaUrl||'',
+  seconds:Number(entry.seconds)||15,prompt:entry.label||'Choice '+(i+1)
+ }));
+ if(type==='wheel')return {slices:choices};
+ if(type==='duel'||type==='prompts')return {choices,rounds:5};
+ return {choices};
+}
+function renderMemberEditor(approved){
+ const root=$('#memberGameEditor');if(!root)return;
+ const options=approved.map(m=>'<option value="'+esc(m.id)+'">'+esc(m.name)+'</option>').join('');
+ const approvalSelect=(value)=>'<option value="">Choose cleared media / keep draft</option>'+
+  approved.map(m=>'<option value="'+esc(m.id)+'"'+(m.id===value?' selected':'')+'>'+esc(m.name)+'</option>').join('');
  if(chosenGameType==='special'){
   const starter='Roulette:roulette\nShuffle:shuffle\nChoices:choices\nMystery:mystery\nArcade:arcade\nHighlights:test';
-  root.innerHTML='<div class="member-card" style="padding:16px"><div class="overline">SPECIAL GAME BUILDER</div>'+
-   '<h3>Configure the card themes</h3><p class="micro-note">Choose 4–10 cards. Each line has a label and a published feed hashtag separated by a colon. Use tags already present in your posts.</p>'+
-   '<label>Theme cards<textarea id="memberSpecialTags" rows="7" spellcheck="false">'+esc(starter)+'</textarea></label>'+
-   '<label>Fast-reel speed<select id="memberSpecialSpeed"><option value="180">Very fast (180 ms)</option><option value="210" selected>Fast (210 ms)</option><option value="260">Steady (260 ms)</option><option value="350">Relaxed (350 ms)</option><option value="500">Slow (500 ms)</option></select></label>'+
-   '<h3>Optional narration clips (MP3)</h3><p class="micro-note">Use approved HTTPS media URLs to MP3 files. These clips are played at the matching stage where the browser allows audio.</p>'+
-   [['welcome','Welcome'],['shuffle','Shuffle'],['reel','Reel'],['gallery','Gallery'],['finish','Finish']].map(([id,label])=>
-    '<label>'+label+' MP3 URL<input type="url" data-member-voice="'+id+'" placeholder="https://.../audio.mp3"></label>').join('')+
-   '</div>';
+  root.innerHTML='<section class="game-step-panel"><div class="overline">SPECIAL GAME BUILDER</div><h3>Choose the themes</h3>'+
+    '<p>Add 4–10 labeled cards using <code>Title:hashtag</code>. The reel uses published posts with matching tags.</p>'+
+    '<label>Category cards<textarea id="memberSpecialTags" rows="7" spellcheck="false">'+esc(starter)+'</textarea></label>'+
+    '<label>Reel speed <select id="memberSpecialSpeed">'+[180,210,260,350,500].map(v=>'<option value="'+v+'">'+v+' ms</option>').join('')+'</select></label>'+
+    '<h3>Optional voice clips</h3>'+
+    [['welcome','Welcome'],['shuffle','Shuffle'],['reel','Reel'],['gallery','Gallery'],['finish','Finish']].map(([key,name])=>
+     '<label>'+name+' MP3 URL<input type="url" data-member-voice="'+key+'" placeholder="https://.../audio.mp3"></label>').join('')+
+    '</section>';
   return;
  }
-const opts='<option value="">No media / placeholder</option>'+approved.map(m=>`<option value="${esc(m.id)}">${esc(m.name)}</option>`).join('');if(chosenGameType!=='hotspots'){const number=chosenGameType==='wheel'?8:chosenGameType==='tiles'?9:chosenGameType==='duel'?4:3;root.innerHTML=`<p class="micro-note">Assign authorized media and editable choice labels. You can save the game privately before publication.</p><div class="outcome-list">${Array.from({length:number},(_,i)=>`<div class="outcome-row"><label>Result ${i+1}<input data-outcome-label placeholder="Choice ${i+1}" maxlength="80"></label><label>Approved media<select data-outcome-media>${opts}</select></label></div>`).join('')}</div>`;return}
- const n=newGame.nodes.length,idx=Math.min(newGame.currentNode,n-1),node=newGame.nodes[idx];root.innerHTML=`<div class="path-member-editor"><div class="path-toolbar"><label>Round<select id="memberRound">${newGame.nodes.map((n,i)=>`<option value="${i}" ${idx===i?'selected':''}>${i+1}. ${esc(n.title)}</option>`).join('')}</select></label><label>Length<select id="memberLength">${[5,10,20,30].map(i=>`<option value="${i}" ${n-1===i?'selected':''}>${i} rounds</option>`).join('')}</select></label><button type="button" id="memberGenerate" class="button subtle">Generate path</button></div><p class="micro-note">Move any circle by dragging. Tap empty space to add an oval. The last round is a final reveal.</p><label>Round title<input id="memberNodeTitle" value="${esc(node.title)}"></label><label>Round image<select id="memberNodeMedia">${opts.replace(`value="${esc(node.mediaId)}"`,`value="${esc(node.mediaId)}" selected`)}</select></label><div class="member-hotspot-canvas" id="memberCanvas" style="background-image:${node.mediaId&&approved.find(m=>m.id===node.mediaId)?`linear-gradient(#0002,#0005),url('${esc(approved.find(m=>m.id===node.mediaId).url)}')`:'none'}">${node.spots.map((s,i)=>`<button type="button" class="member-hotspot" data-index="${i}" style="left:${s.x}%;top:${s.y}%;width:${s.w}%;height:${s.h}%;border-radius:${s.shape==='oval'?'50%':'12px'}">${esc(s.label)}</button>`).join('')}<span class="canvas-caption">${node.spots.length?'DRAG TO PLACE · TAP EMPTY AREA TO ADD':'FINAL REVEAL'}</span></div><div class="hotspot-properties">${node.spots.map((s,i)=>`<div class="spot-properties"><span>Spot ${i+1}</span><input data-label="${i}" value="${esc(s.label)}" aria-label="Spot label"><select data-shape="${i}"><option value="oval" ${s.shape==='oval'?'selected':''}>Oval</option><option value="rectangle" ${s.shape==='rectangle'?'selected':''}>Rectangle</option></select><input type="number" data-width="${i}" min="5" max="90" value="${s.w}" aria-label="Width %"><input type="number" data-height="${i}" min="5" max="90" value="${s.h}" aria-label="Height %"><button class="button subtle" type="button" data-remove-hotspot="${i}">×</button></div>`).join('')}</div></div>`;
- $('#memberRound').onchange=e=>{newGame.currentNode=Number(e.target.value);renderMemberEditor(approved)};$('#memberGenerate').onclick=()=>{const amount=Number($('#memberLength').value);newGame.nodes=Array.from({length:amount},(_,i)=>initNode(i));newGame.nodes.push({round:amount+1,title:'Final reveal',subtitle:'Your discovery',mediaId:'',seconds:15,spots:[]});newGame.currentNode=0;renderMemberEditor(approved)};$('#memberNodeTitle').onchange=e=>{node.title=e.target.value};$('#memberNodeMedia').onchange=e=>{node.mediaId=e.target.value;renderMemberEditor(approved)};
- const canvas=$('#memberCanvas');canvas.onclick=e=>{if(e.target.closest('button')||node.spots.length>=8||idx===n-1)return;const r=canvas.getBoundingClientRect(),x=Math.round((e.clientX-r.left)/r.width*100),y=Math.round((e.clientY-r.top)/r.height*100);node.spots.push({x,y,w:18,h:15,shape:'oval',label:String(node.spots.length+1),next:`round_${String(idx+2).padStart(2,'0')}`});renderMemberEditor(approved)};
- $all('.member-hotspot',canvas).forEach(b=>{let drag=false;b.onpointerdown=e=>{e.preventDefault();drag=true;b.setPointerCapture(e.pointerId)};b.onpointermove=e=>{if(!drag)return;const r=canvas.getBoundingClientRect(),s=node.spots[Number(b.dataset.index)];s.x=Math.max(0,Math.min(100,Math.round((e.clientX-r.left)/r.width*100)));s.y=Math.max(0,Math.min(100,Math.round((e.clientY-r.top)/r.height*100)));b.style.left=s.x+'%';b.style.top=s.y+'%'};b.onpointerup=()=>{drag=false}});
- $all('[data-label]',root).forEach(el=>el.onchange=e=>{node.spots[Number(el.dataset.label)].label=e.target.value;renderMemberEditor(approved)});$all('[data-shape]',root).forEach(el=>el.onchange=e=>{node.spots[Number(el.dataset.shape)].shape=e.target.value;renderMemberEditor(approved)});$all('[data-width]',root).forEach(el=>el.onchange=e=>{node.spots[Number(el.dataset.width)].w=Number(e.target.value);renderMemberEditor(approved)});$all('[data-height]',root).forEach(el=>el.onchange=e=>{node.spots[Number(el.dataset.height)].h=Number(e.target.value);renderMemberEditor(approved)});$all('[data-remove-hotspot]',root).forEach(el=>el.onclick=()=>{node.spots.splice(Number(el.dataset.removeHotspot),1);renderMemberEditor(approved)})
+ if(chosenGameType!=='hotspots'){
+  const count=chosenGameType==='wheel'?8:chosenGameType==='tiles'?9:chosenGameType==='duel'?4:3;
+  if(!newGame.outcomes)newGame.outcomes={};
+  const rows=newGame.outcomes[chosenGameType]||[];
+  while(rows.length<count)rows.push({label:'Choice '+(rows.length+1),mediaId:'',mediaUrl:'',seconds:15});
+  newGame.outcomes[chosenGameType]=rows;
+  root.innerHTML='<section class="game-step-panel"><div class="overline">SET UP THE OUTCOMES</div><h3>Media and choices</h3>'+
+   '<p>Upload your own image or GIF for each outcome. Images are saved privately until they meet the public content checks.</p>'+
+   '<div class="outcome-list">'+rows.map((item,i)=>'<div class="outcome-row outcome-card"><header>Outcome '+(i+1)+'</header>'+
+    '<label>Choice label<input data-choice-label="'+i+'" maxlength="80" value="'+esc(item.label||'')+'"></label>'+
+    '<label>Cleared media<select data-choice-media="'+i+'">'+approvalSelect(item.mediaId)+'</select></label>'+
+    '<label>Upload your own media<input type="file" data-choice-upload="'+i+'" accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm"></label>'+
+    (item.mediaUrl?'<div class="outcome-media-preview">'+( /\.(mp4|webm)([?#]|$)/i.test(item.mediaUrl)?'<video src="'+esc(item.mediaUrl)+'" controls muted playsinline></video>':'<img src="'+esc(item.mediaUrl)+'" alt="Outcome media">')+'</div>':'')+
+    '<label>Reveal time: <b id="choiceSeconds_'+i+'">'+(item.seconds||15)+'s</b><input type="range" min="3" max="60" step="1" value="'+(item.seconds||15)+'" data-choice-seconds="'+i+'"></label>'+
+    '<p class="game-file-status" data-choice-status="'+i+'"></p></div>').join('')+'</div></section>';
+  $all('[data-choice-label]',root).forEach(input=>input.oninput=()=>{rows[Number(input.dataset.choiceLabel)].label=input.value});
+  $all('[data-choice-media]',root).forEach(input=>input.onchange=()=>{rows[Number(input.dataset.choiceMedia)].mediaId=input.value});
+  $all('[data-choice-seconds]',root).forEach(input=>input.oninput=()=>{const i=Number(input.dataset.choiceSeconds);rows[i].seconds=Number(input.value);$('#choiceSeconds_'+i).textContent=input.value+'s'});
+  $all('[data-choice-upload]',root).forEach(input=>input.onchange=async()=>{
+   const file=input.files?.[0],i=Number(input.dataset.choiceUpload);
+   if(!file)return;const ref=String($('#gameRights')?.value||'').trim();
+   const status=$('[data-choice-status="'+i+'"]',root);
+   try{
+    if(!window.LUSTSINO_UPLOAD)throw Error('Uploader unavailable; reload the site.');
+    const output=await window.LUSTSINO_UPLOAD.upload(file,ref,text=>{if(status)status.textContent=text});
+    rows[i].mediaUrl=output.url;rows[i].mediaId='';
+    msg('Image uploaded for outcome '+(i+1)+'. Add a cleared media assignment before public release.');
+    renderMemberEditor(approved);
+   }catch(error){if(status)status.textContent=error.message||'Upload failed.'}
+  });
+  return;
+ }
+ if(!newGame.nodes?.length)newGame.nodes=[initNode(0),{round:2,title:'Final reveal',mediaId:'',mediaUrl:'',seconds:15,spots:[]}];
+ const count=newGame.nodes.length,idx=Math.max(0,Math.min(newGame.currentNode||0,count-1));
+ newGame.currentNode=idx;
+ const node=newGame.nodes[idx],end=idx===count-1;
+ const selected=approved.find(m=>m.id===node.mediaId);
+ const visual=safeUrl(node.mediaUrl||selected?.url||'');
+ root.innerHTML='<section class="game-step-panel path-member-editor">'+
+  '<div class="overline">CIRCLE PATHS DESIGNER</div><h3>Build each round visually</h3>'+
+  '<div class="path-toolbar">'+
+   '<button class="button secondary" type="button" id="memberPrevRound"'+(idx===0?' disabled':'')+'>← Previous</button>'+
+   '<label>Round<select id="memberRound">'+newGame.nodes.map((n,i)=>'<option value="'+i+'"'+(i===idx?' selected':'')+'>'+(i+1)+'. '+esc(n.title)+'</option>').join('')+'</select></label>'+
+   '<button class="button secondary" type="button" id="memberNextRound"'+(idx===count-1?' disabled':'')+'>Next →</button>'+
+  '</div><div class="path-toolbar"><label>Total rounds<select id="memberLength">'+[5,10,20,30].map(n=>'<option value="'+n+'"'+(count-1===n?' selected':'')+'>'+n+' rounds</option>').join('')+'</select></label>'+
+  '<button type="button" id="memberGenerate" class="button subtle">Regenerate rounds</button></div>'+
+  '<label>Round title<input id="memberNodeTitle" value="'+esc(node.title)+'" maxlength="90"></label>'+
+  '<div class="round-media-tools"><label>Choose cleared media<select id="memberNodeMedia">'+approvalSelect(node.mediaId)+'</select></label>'+
+  '<label>Add an image/GIF for this round<input id="memberNodeFile" type="file" accept="image/jpeg,image/png,image/webp,image/gif"></label></div>'+
+  (visual?'<p class="micro-note">Previewing your selected round media. Public release requires a cleared media assignment.</p>':'<p class="micro-note">Select an image to place circles on it.</p>')+
+  '<div class="member-hotspot-canvas" id="memberCanvas" style="background-image:'+(visual?'linear-gradient(#0002,#0005),url(&quot;'+esc(visual)+'&quot;)':'none')+'">'+
+  (node.spots||[]).map((spot,i)=>'<button class="member-hotspot" type="button" data-index="'+i+'" style="left:'+spot.x+'%;top:'+spot.y+'%;width:'+spot.w+'%;height:'+spot.h+'%;border-radius:'+(spot.shape==='oval'?'50%':'12px')+'">'+esc(spot.label)+'</button>').join('')+
+  '<span class="canvas-caption">'+(end?'FINAL REVEAL':'DRAG SPOTS · TAP IMAGE TO ADD A CIRCLE')+'</span></div>'+
+  '<div class="round-timing"><label>Reveal duration: <strong id="roundSecondsLabel">'+(node.preview_seconds||5)+' sec</strong>'+
+  '<input id="roundSeconds" type="range" min="2" max="45" step="1" value="'+(node.preview_seconds||5)+'"></label></div>'+
+  '<div class="hotspot-properties">'+(node.spots||[]).map((spot,i)=>
+   '<div class="spot-properties"><strong>Circle '+(i+1)+'</strong>'+
+   '<label>Label<input data-label="'+i+'" value="'+esc(spot.label)+'" aria-label="Circle label"></label>'+
+   '<label>Shape<select data-shape="'+i+'"><option value="oval"'+(spot.shape==='oval'?' selected':'')+'>Oval</option><option value="rectangle"'+(spot.shape==='rectangle'?' selected':'')+'>Rectangle</option></select></label>'+
+   '<label>Width <input type="range" data-width="'+i+'" min="6" max="90" value="'+spot.w+'"></label>'+
+   '<label>Height <input type="range" data-height="'+i+'" min="6" max="90" value="'+spot.h+'"></label>'+
+   '<label>Next round<select data-next="'+i+'">'+newGame.nodes.map((v,j)=>'<option value="round_'+String(j+1).padStart(2,'0')+'"'+(spot.next==='round_'+String(j+1).padStart(2,'0')?' selected':'')+'>'+(j+1)+'. '+esc(v.title)+'</option>').join('')+'</select></label>'+
+   '<button type="button" class="button subtle" data-remove-hotspot="'+i+'">Remove</button></div>').join('')+'</div>'+
+  '</section>';
+ $('#memberRound').onchange=e=>{newGame.currentNode=Number(e.target.value);renderMemberEditor(approved)};
+ $('#memberPrevRound').onclick=()=>{newGame.currentNode=idx-1;renderMemberEditor(approved)};
+ $('#memberNextRound').onclick=()=>{newGame.currentNode=idx+1;renderMemberEditor(approved)};
+ $('#memberGenerate').onclick=()=>{
+  if(!confirm('Regenerate all rounds? This will replace the current circle positions.'))return;
+  const amount=Number($('#memberLength').value);
+  newGame.nodes=Array.from({length:amount},(_,i)=>initNode(i));
+  newGame.nodes.push({round:amount+1,title:'Final reveal',subtitle:'Your discovery',mediaId:'',mediaUrl:'',seconds:15,spots:[]});
+  newGame.currentNode=0;renderMemberEditor(approved);
+ };
+ $('#memberNodeTitle').oninput=e=>{node.title=e.target.value};
+ $('#memberNodeMedia').onchange=e=>{node.mediaId=e.target.value;node.mediaUrl='';renderMemberEditor(approved)};
+ $('#memberNodeFile').onchange=async e=>{
+  const file=e.target.files?.[0];if(!file)return;
+  const ref=String($('#gameRights')?.value||'').trim();
+  try {
+   if(!window.LUSTSINO_UPLOAD)throw Error('Uploader unavailable; refresh the page.');
+   const result=await window.LUSTSINO_UPLOAD.upload(file,ref,text=>{const el=$('#gameSaveStatus');if(el)el.textContent=text});
+   node.mediaUrl=result.url;node.mediaId='';renderMemberEditor(approved);
+   msg('Round '+(idx+1)+' image saved. Add the cleared media assignment before publishing.');
+  }catch(error){msg(error.message||'Round image upload failed.')}
+ };
+ $('#roundSeconds').oninput=e=>{node.preview_seconds=Number(e.target.value);$('#roundSecondsLabel').textContent=e.target.value+' sec'};
+ const canvas=$('#memberCanvas');
+ canvas.onclick=e=>{
+  if(e.target.closest('button')||node.spots.length>=8||end)return;
+  const b=canvas.getBoundingClientRect(),x=Math.round((e.clientX-b.left)/b.width*100),y=Math.round((e.clientY-b.top)/b.height*100);
+  node.spots.push({x,y,w:18,h:15,shape:'oval',label:String(node.spots.length+1),next:'round_'+String(idx+2).padStart(2,'0')});
+  renderMemberEditor(approved);
+ };
+ $all('.member-hotspot',canvas).forEach(button=>{
+  let dragging=false;button.onpointerdown=e=>{dragging=true;button.setPointerCapture(e.pointerId);e.preventDefault()};
+  button.onpointermove=e=>{
+   if(!dragging)return;const bounds=canvas.getBoundingClientRect(),spot=node.spots[Number(button.dataset.index)];
+   spot.x=Math.max(0,Math.min(100,Math.round((e.clientX-bounds.left)/bounds.width*100)));
+   spot.y=Math.max(0,Math.min(100,Math.round((e.clientY-bounds.top)/bounds.height*100)));
+   button.style.left=spot.x+'%';button.style.top=spot.y+'%';
+  };
+  button.onpointerup=()=>{dragging=false};
+  button.onpointercancel=()=>{dragging=false};
+ });
+ for(const field of ['label','shape','width','height','next']){
+  $all('[data-'+field+']',root).forEach(input=>{
+   const index=Number(input.dataset[field]);
+   input.oninput=()=>{
+    const spot=node.spots[index],button=canvas.querySelector('[data-index="'+index+'"]');
+    if(!spot)return;
+    if(field==='label'){spot.label=input.value;if(button)button.textContent=input.value;}
+    else if(field==='shape'){spot.shape=input.value;if(button)button.style.borderRadius=input.value==='oval'?'50%':'12px';}
+    else if(field==='width'){spot.w=Number(input.value);if(button)button.style.width=spot.w+'%';}
+    else if(field==='height'){spot.h=Number(input.value);if(button)button.style.height=spot.h+'%';}
+    else if(field==='next'){spot.next=input.value;}
+   };
+  });
+ }
+ $all('[data-remove-hotspot]',root).forEach(button=>button.onclick=()=>{node.spots.splice(Number(button.dataset.removeHotspot),1);renderMemberEditor(approved)});
 }
 async function renderMyDrafts(){
- const root=$('#memberToolBody');
- root.innerHTML='<p>Loading your saved content…</p>';
+ const root=$('#memberToolBody');if(!root)return;root.innerHTML='<div class="member-card">Loading your creations…</div>';
  const [posts,games]=await Promise.all([
-  db().from('community_posts').select('id,title,review_status,published').eq('owner_id',viewer.id).order('created_at',{ascending:false}).limit(50),
-  db().from('experiences').select('id,title,review_status,published').eq('author_id',viewer.id).order('created_at',{ascending:false}).limit(50)
+  db().from('community_posts').select('id,title,review_status,published,created_at').eq('owner_id',viewer.id).order('created_at',{ascending:false}).limit(100),
+  db().from('experiences').select('id,title,review_status,published,created_at').eq('author_id',viewer.id).order('created_at',{ascending:false}).limit(100)
  ]);
+ if(posts.error||games.error){root.innerHTML='<div class="member-card">Could not load your drafts. '+esc(posts.error?.message||games.error?.message)+'</div>';return;}
  const canPublish=profile?.creator_status==='verified'||!!core()?.admin;
- const gameRows=(games.data||[]).map(g=>'<div class="draft-row"><span>'+esc(g.title)+'</span><small>'+(g.published?'Live':'Saved draft')+'</small></div>').join('');
- const postRows=(posts.data||[]).map(p=>'<div class="draft-row"><span>'+esc(p.title)+'</span><small>'+(p.published?'Live':'Saved draft')+'</small>'+
-  (canPublish&&!p.published?'<button type="button" class="button secondary smallish" data-publish-post="'+esc(p.id)+'">Publish</button>':'')+'</div>').join('');
- root.innerHTML='<div class="member-card"><h2>Your creations</h2><p>Your drafts stay private. Once verified, completed Bunny uploads can go live immediately without another review.</p><h3>Games</h3>'+
-  (gameRows||'<p>No games yet.</p>')+'<h3>Media posts</h3>'+(postRows||'<p>No posts yet.</p>')+'</div>';
- $all('[data-publish-post]',root).forEach(btn=>btn.onclick=async()=>{
+ const gameRows=(games.data||[]).map(game=>
+  '<article class="creator-draft-card"><div><strong>'+esc(game.title)+'</strong>'+
+  '<span class="draft-state">'+(game.published?'Live game':'Private game draft')+'</span></div>'+
+  (!game.published?'<button type="button" class="button subtle" data-delete-game="'+esc(game.id)+'">Delete draft</button>':'')+'</article>').join('');
+ const postRows=(posts.data||[]).map(post=>
+  '<article class="creator-draft-card"><div><strong>'+esc(post.title)+'</strong>'+
+  '<span class="draft-state">'+(post.published?'Live post':'Private post draft')+'</span></div>'+
+  '<div class="draft-card-buttons">'+(canPublish&&!post.published?'<button type="button" class="button secondary" data-publish-post="'+esc(post.id)+'">Publish</button>':'')+
+  (!post.published?'<button type="button" class="button subtle" data-delete-post="'+esc(post.id)+'">Delete draft</button>':'')+'</div></article>').join('');
+ root.innerHTML='<div class="member-card"><span class="overline">YOUR WORKSPACE</span><h2>My creations</h2>'+
+  '<p>Find every game and feed post you have made. Private drafts are only visible to you.</p>'+
+  '<div class="studio-actions"><button type="button" class="button secondary" data-tool="game">＋ Build game</button>'+
+  '<button type="button" class="button secondary" data-tool="post">＋ New post</button></div>'+
+  '<h3>Games</h3>'+(gameRows||'<p>No games created yet.</p>')+
+  '<h3>Feed posts</h3>'+(postRows||'<p>No feed posts yet.</p>')+'</div>';
+ root.querySelectorAll('[data-tool]').forEach(btn=>btn.onclick=()=>{
+  root.closest('#communityPanel')?.querySelectorAll('.member-tool-tabs [data-tool]').forEach(tab=>tab.classList.toggle('active',tab.dataset.tool===btn.dataset.tool));
+  renderTool(btn.dataset.tool);
+ });
+ root.querySelectorAll('[data-delete-game],[data-delete-post]').forEach(button=>button.onclick=async()=>{
+  const game=!!button.dataset.deleteGame,id=game?button.dataset.deleteGame:button.dataset.deletePost;
+  if(!confirm('Permanently delete this private '+(game?'game':'post')+' draft?'))return;
+  button.disabled=true;
+  const table=game?'experiences':'community_posts',owner=game?'author_id':'owner_id';
+  const {data,error}=await db().from(table).delete().eq('id',id).eq(owner,viewer.id).eq('published',false).select('id');
+  if(error){button.disabled=false;return msg(error.message)}
+  if(!data?.length){button.disabled=false;return msg('Draft was not deleted. Check your account permissions.')}
+  if(game)await core()?.refreshRemote?.();
+  msg('Draft deleted.');renderMyDrafts();
+ });
+ root.querySelectorAll('[data-publish-post]').forEach(btn=>btn.onclick=async()=>{
   btn.disabled=true;
-  const {error}=await db().from('community_posts').update({published:true,review_status:'approved'}).eq('id',btn.dataset.publishPost).eq('owner_id',viewer.id);
-  if(error){btn.disabled=false;return msg('Cannot publish this draft: '+error.message+'. Confirm it is your completed Bunny upload, with the same rights reference and verified House Creator access.');}
-  msg('Post published.');renderMyDrafts();
+  const {data,error}=await db().from('community_posts')
+   .update({published:true,review_status:'approved'})
+   .eq('id',btn.dataset.publishPost).eq('owner_id',viewer.id).select('id');
+  if(error||!data?.length){btn.disabled=false;return msg((error?.message||'Could not publish')+
+   '. Publishing requires your verified creator status and a matching completed Bunny upload.')}
+  msg('Your post is now live.');renderMyDrafts();
  });
 }
 async function renderReviewTool(){
