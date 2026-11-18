@@ -360,9 +360,9 @@ function makeGameConfig(type){
   return {tagCards:cards,reelSpeedMs:Math.max(150,Math.min(650,Number($('#memberSpecialSpeed')?.value)||210)),
           voice,lockMediaAssignments:true,rotateMedia:false};
  }
- if(type==='hotspots'){if(newGame.nodes.length<2)return null;const nodes={};newGame.nodes.forEach((n,i)=>nodes['round_'+String(i+1).padStart(2,'0')]=JSON.parse(JSON.stringify(n)));return {nodes,startNode:'round_01',totalRounds:newGame.nodes.length-1,lockMediaAssignments:true,rotateMedia:false}}
+ if(type==='hotspots'){if(newGame.nodes.length<2)return null;const nodes={};newGame.nodes.forEach((n,i)=>{const copy=JSON.parse(JSON.stringify(n));delete copy.previewObjectUrl;nodes['round_'+String(i+1).padStart(2,'0')]=copy});return {nodes,startNode:'round_01',totalRounds:newGame.nodes.length-1,lockMediaAssignments:true,rotateMedia:false}}
  const choices=(newGame.outcomes?.[type]||[]).map((entry,i)=>({
-  label:entry.label||'Choice '+(i+1),mediaId:entry.mediaId||'',mediaUrl:entry.mediaUrl||'',
+  label:entry.label||'Choice '+(i+1),mediaId:entry.mediaId||'',mediaUrl:entry.mediaUrl||'',uploadId:entry.uploadId||'',
   seconds:Number(entry.seconds)||15,prompt:entry.label||'Choice '+(i+1)
  }));
  if(type==='wheel')return {slices:choices};
@@ -402,7 +402,7 @@ function renderMemberEditor(approved){
     '<label>Reveal time: <b id="choiceSeconds_'+i+'">'+(item.seconds||15)+'s</b><input type="range" min="3" max="60" step="1" value="'+(item.seconds||15)+'" data-choice-seconds="'+i+'"></label>'+
     '<p class="game-file-status" data-choice-status="'+i+'"></p></div>').join('')+'</div></section>';
   $all('[data-choice-label]',root).forEach(input=>input.oninput=()=>{rows[Number(input.dataset.choiceLabel)].label=input.value});
-  $all('[data-choice-media]',root).forEach(input=>input.onchange=()=>{rows[Number(input.dataset.choiceMedia)].mediaId=input.value});
+  $all('[data-choice-media]',root).forEach(input=>input.onchange=()=>{rows[Number(input.dataset.choiceMedia)].mediaId=input.value;rows[Number(input.dataset.choiceMedia)].mediaUrl='';rows[Number(input.dataset.choiceMedia)].uploadId='';renderMemberEditor(approved)});
   $all('[data-choice-seconds]',root).forEach(input=>input.oninput=()=>{const i=Number(input.dataset.choiceSeconds);rows[i].seconds=Number(input.value);$('#choiceSeconds_'+i).textContent=input.value+'s'});
   $all('[data-choice-upload]',root).forEach(input=>input.onchange=async()=>{
    const file=input.files?.[0],i=Number(input.dataset.choiceUpload);
@@ -411,7 +411,7 @@ function renderMemberEditor(approved){
    try{
     if(!window.LUSTSINO_UPLOAD)throw Error('Uploader unavailable; reload the site.');
     const output=await window.LUSTSINO_UPLOAD.upload(file,ref,text=>{if(status)status.textContent=text});
-    rows[i].mediaUrl=output.url;rows[i].mediaId='';
+    rows[i].mediaUrl=output.url;rows[i].uploadId=output.uploadId;rows[i].mediaId='';
     msg('Image uploaded for outcome '+(i+1)+'. Add a cleared media assignment before public release.');
     renderMemberEditor(approved);
    }catch(error){if(status)status.textContent=error.message||'Upload failed.'}
@@ -461,14 +461,14 @@ function renderMemberEditor(approved){
   newGame.currentNode=0;renderMemberEditor(approved);
  };
  $('#memberNodeTitle').oninput=e=>{node.title=e.target.value};
- $('#memberNodeMedia').onchange=e=>{node.mediaId=e.target.value;node.mediaUrl='';renderMemberEditor(approved)};
+ $('#memberNodeMedia').onchange=e=>{node.mediaId=e.target.value;node.mediaUrl='';node.uploadId='';renderMemberEditor(approved)};
  $('#memberNodeFile').onchange=async e=>{
   const file=e.target.files?.[0];if(!file)return;
   const ref='';
   try {
    if(!window.LUSTSINO_UPLOAD)throw Error('Uploader unavailable; refresh the page.');
    const result=await window.LUSTSINO_UPLOAD.upload(file,ref,text=>{const el=$('#gameSaveStatus');if(el)el.textContent=text});
-   node.mediaUrl=result.url;node.mediaId='';renderMemberEditor(approved);
+   node.mediaUrl=result.url;node.uploadId=result.uploadId;node.mediaId='';if(node.previewObjectUrl){URL.revokeObjectURL(node.previewObjectUrl);node.previewObjectUrl='';}renderMemberEditor(approved);
    msg('Round '+(idx+1)+' image saved. Add the cleared media assignment before publishing.');
   }catch(error){msg(error.message||'Round image upload failed.')}
  };
