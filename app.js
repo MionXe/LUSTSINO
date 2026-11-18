@@ -100,14 +100,15 @@ $('#creatorGrid').innerHTML=publishedCreators.length?realProfiles:demoProfiles;
 function route(name){if(name!=='play'){$('#returnGameStudioBtn')?.setAttribute('hidden','');window.LUSTSINO_SPECIAL?.cleanup();clearTimer();if(state.wheelFrame){cancelAnimationFrame(state.wheelFrame);state.wheelFrame=0}}if(name==='studio'&&!isAdmin)name='account';if(!['home','games','play','creators','studio','about','feed','search','account','leaderboard','terms','privacy','safety','community'].includes(name))name='home';state.route=name;$$('.view').forEach(e=>e.classList.toggle('show',e.id==='view-'+name));$$('[data-route]').forEach(b=>b.classList.toggle('active',b.dataset.route===name));if(name==='studio'&&isAdmin)renderStudio();if(name==='games'||name==='home'||name==='creators')renderPublic();window.scrollTo({top:0,behavior:'instant'});const hash=(name==='play')?'#play':`#${name}`;if(location.hash!==hash)history.replaceState(null,'',hash)}
 function startGame(gameId){
  const preview=typeof gameId==='object' && (String(gameId.id||'').startsWith('preview-')||gameId.slug==='draft-preview');
+ const previewReturn=state.route==='studio'&&isAdmin?'studio':'community';
  const studioBack=$('#returnGameStudioBtn');
  if(studioBack){
   studioBack.hidden=!preview;
   studioBack.onclick=()=>{
    if(state.route!=='play')return;
    clearTimer();
-   route('community');
-   $('#memberGameEditor')?.scrollIntoView({block:'start',behavior:'smooth'});
+   route(previewReturn);
+   (previewReturn==='studio'?$('#gameForm'):$('#memberGameEditor'))?.scrollIntoView({block:'start',behavior:'smooth'});
   };
  }
  window.LUSTSINO_SPECIAL?.cleanup();if(state.wheelFrame){cancelAnimationFrame(state.wheelFrame);state.wheelFrame=0}const origin=typeof gameId==='object'?gameId:state.experiences.find(x=>x.id===gameId||x.slug===gameId);const g=origin?sessionGame(origin):null;if(!g){notify('Game not found.');return}clearTimer();state.current=g;state.playing=false;state.wheelTurns=0;state.hotNode=g.config?.startNode||'start';state.pathPhase='choose';state.pathChoice=null;state.duelStage=0;state.cardIndices=[];$('#playType').textContent=labelOf(g.type);$('#playTitle').textContent=g.title;$('#playDescription').textContent=g.description||'';route('play');updateStats();renderGame();window.dispatchEvent(new CustomEvent('lustsino:game-start',{detail:{id:g.id,type:g.type,title:g.title}}));}
