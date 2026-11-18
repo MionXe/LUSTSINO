@@ -157,66 +157,78 @@ function ensureGate(){if(!viewer)return 'Sign in to publish content or build gam
 function renderCommunity(){let root=$('#communityPanel');if(!root)return;const warning=ensureGate();if(warning){root.innerHTML=`<div class="member-card"><h2>Member Studio</h2><p>${esc(warning)}</p><button class="button primary" data-route="account">Go to account ↗</button></div>`;return}
  root.innerHTML=`<div class="member-tool-tabs"><button class="active" data-tool="post">Submit a post</button><button data-tool="game">Create a game</button><button data-tool="mine">My drafts</button>${core()?.admin?'<button data-tool="review">Moderate</button>':''}</div><div id="memberToolBody"></div>`;$all('[data-tool]',root).forEach(b=>b.onclick=()=>{$all('[data-tool]',root).forEach(x=>x.classList.toggle('active',x===b));renderTool(b.dataset.tool)});renderTool('post')}
 function renderTool(tool){if(tool==='post')renderPostTool();else if(tool==='game')renderGameTool();else if(tool==='mine')renderMyDrafts();else if(tool==='review')renderReviewTool()}
-function renderPostTool(){const root=$('#memberToolBody');root.innerHTML=`<div class="member-card"><span class="overline">POST TO THE VELVET FEED</span><h2>Submit authorized media</h2><p>Verified House Creators can publish their own Bunny uploads to the feed immediately. Other players can save a private submission while creator verification is completed. Content rights and consent are required.</p><form id="submitPost" class="stack-form"><label>Title<input name="title" required maxlength="140"></label><label>Description<textarea name="description" maxlength="1000"></textarea></label><input type="hidden" name="media_type" value="image"><label>Media link (filled after upload)<input id="mediaRemoteURL" type="url" name="media_url" placeholder="https://approved-host.example/file.webp"></label><label>Choose an image, GIF, or short video<input id="uploadCandidate" type="file" accept="image/webp,image/png,image/jpeg,image/gif,video/mp4,video/webm"></label><div id="uploadPreview" class="micro-note">Add your permission reference, select media, and upload to Bunny. An upload alone does not publish the content.</div><button id="sendToStorage" class="button subtle" type="button" disabled>Upload to Bunny</button><label>Creator credit<input name="creator_credit" required maxlength="120"></label><label>Creator page (optional)<input name="source_url" type="url" placeholder="https://..."></label><label>Written permission reference<input name="rights_reference" required minlength="3" maxlength="200"></label><label>Tags<input name="tags" placeholder="editorial, cosplay, creative" maxlength="160"></label><label class="check-row"><input name="permission" type="checkbox" required> I have permission to submit this content, and the depicted adults are verified with documented consent.</label><button class="button primary" type="submit">Publish / save post ↗</button></form></div>`;
- const f=$('#uploadCandidate'),preview=$('#uploadPreview'),send=$('#sendToStorage');f.onchange=()=>{const file=f.files[0];if(!file)return;const obj=URL.createObjectURL(file);preview.innerHTML=`<p>Preview only · ${esc(file.name)} (${Math.round(file.size/1024)} KB)</p>${file.type.startsWith('image/')?`<img style="max-width:180px;max-height:220px;border-radius:12px" src="${obj}" alt="Local preview">`:`<video style="max-width:180px" controls src="${obj}"></video>`}`;send.disabled=!window.VYRA_CONFIG?.uploadEndpoint};send.onclick=async()=>{
- const endpoint=window.VYRA_CONFIG?.uploadEndpoint,file=f.files[0];
- if(!endpoint||!file)return msg("Choose a file first.");
- const {data:{session}}=await db().auth.getSession();
- if(!session)return msg("Please sign in before uploading.");
- const rightsRef=String($('#submitPost [name="rights_reference"]')?.value||"").trim();
- if(rightsRef.length<3)return msg("Enter the written permission reference before uploading.");
- send.disabled=true;send.textContent="Preparing upload…";
- try {
-  let upload=file;
-  if(["image/jpeg","image/png","image/webp"].includes(file.type)&&file.size<20000000){
-   try{const bitmap=await createImageBitmap(file),scale=Math.min(1,1600/Math.max(bitmap.width,bitmap.height)),canvas=document.createElement("canvas");canvas.width=Math.round(bitmap.width*scale);canvas.height=Math.round(bitmap.height*scale);canvas.getContext("2d").drawImage(bitmap,0,0,canvas.width,canvas.height);const converted=await new Promise(resolve=>canvas.toBlob(resolve,"image/webp",.85));bitmap.close();if(converted)upload=new File([converted],file.name.replace(/\.[^.]+$/,"")+".webp",{type:"image/webp"})}catch{}
-  }
-  const post=async payload=>{
-   const response=await fetch(endpoint,{method:"POST",headers:{"Content-Type":"application/json",Authorization:"Bearer "+session.access_token,apikey:window.VYRA_CONFIG.supabaseAnonKey},body:JSON.stringify(payload)});
-   const data=await response.json().catch(()=>({}));
-   if(!response.ok)throw Error(data.error||("Storage request failed ("+response.status+")"));
-   return data;
-  };
-  const grant=await post({action:"presign",type:upload.type,size:upload.size,rightsRef});
-  send.textContent="Uploading to Bunny…";
-  const uploaded=await fetch(grant.uploadUrl,{method:"PUT",headers:{"Content-Type":grant.contentType},body:upload});
-  if(!uploaded.ok)throw Error("Bunny rejected the file ("+uploaded.status+"). Check your S3 zone's CORS settings.");
-  send.textContent="Confirming upload…";
-  const result=await post({action:"finalize",uploadId:grant.uploadId});
-  if(result.url){
-   $('#mediaRemoteURL').value=result.url;
-   msg("Bunny upload complete. Add the caption and attribution, then publish if verified.");
-  } else msg("File stored. The Bunny CDN Pull Zone must be connected before it can be shown on the site.");
- }catch(error){msg(error.message||"Upload failed.")}
- finally{send.disabled=false;send.textContent="Upload to Bunny";}
-}
+function renderPostTool(){
+ const root=$('#memberToolBody');if(!root)return;
+ root.innerHTML='<div class="member-card member-compose"><span class="overline">CREATE FOR THE FEED</span><h2>Share a moment</h2>'+
+  '<p>Choose a file, write a caption and press Publish. We handle storage automatically. Verified House Creators can publish eligible media immediately; other submissions remain private drafts.</p>'+
+  '<form id="submitPost" class="stack-form">'+
+   '<label>Photo, animated GIF or short video<input id="uploadCandidate" type="file" accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm"></label>'+
+   '<div id="uploadPreview" class="compose-preview">Choose a file to preview it.</div>'+
+   '<details class="compose-existing"><summary>Already uploaded this file? Use its URL</summary><label>Existing Bunny media URL<input id="mediaRemoteURL" name="media_url" type="url" placeholder="https://your-pull-zone.b-cdn.net/..."></label></details>'+
+   '<label>Post title<input name="title" required maxlength="140" placeholder="Give your post a title"></label>'+
+   '<label>Caption<textarea name="description" maxlength="1000" rows="3" placeholder="Tell visitors about this post…"></textarea></label>'+
+   '<div class="compose-two"><label>Creator credit<input name="creator_credit" required maxlength="120" placeholder="Your creator name"></label>'+
+   '<label>Creator page (optional)<input name="source_url" type="url" placeholder="https://..."></label></div>'+
+   '<label>Tags<input name="tags" placeholder="portraits, game, reveal"></label>'+
+   '<label>Written permission / rights reference<input name="rights_reference" required minlength="3" maxlength="200" placeholder="Release or creator permission ID"></label>'+
+   '<label class="check-row"><input name="permission" type="checkbox" required> I own this media or have documented permission from verified adult participants to submit it.</label>'+
+   '<p id="postProgress" aria-live="polite" class="micro-note"></p>'+
+   '<button class="button primary compose-publish" type="submit">Publish post ↗</button>'+
+  '</form></div>';
+ const fileInput=$('#uploadCandidate'),preview=$('#uploadPreview');
+ let previewObject=null;
+ fileInput.onchange=()=>{
+  if(previewObject)URL.revokeObjectURL(previewObject);
+  const file=fileInput.files?.[0];if(!file){preview.textContent='Choose an image, GIF or short video.';return}
+  previewObject=URL.createObjectURL(file);
+  const media=file.type.startsWith('video/')?
+    '<video controls playsinline muted src="'+esc(previewObject)+'"></video>':
+    '<img src="'+esc(previewObject)+'" alt="Your new post preview">';
+  preview.innerHTML=media+'<small>'+esc(file.name)+' · '+(file.size/(1024*1024)).toFixed(2)+' MB</small>';
+ };
  $('#submitPost').onsubmit=async e=>{
   e.preventDefault();
-  const fd=new FormData(e.target);
-  const media_url=safeUrl(fd.get('media_url'));
-  const rawSource=String(fd.get('source_url')||'').trim();
-  const source_url=rawSource?safeUrl(rawSource):null;
-  if(!media_url||(rawSource&&!source_url))return msg('Provide a valid HTTPS media URL. Creator page links are optional.');
-  if(!fd.get('permission'))return msg('Confirm documented permission and consent first.');
-  const instant=profile?.creator_status==='verified'||!!core()?.admin;
-  const row={
-   owner_id:viewer.id,title:String(fd.get('title')).trim(),
-   description:String(fd.get('description')||'').trim(),
-   media_type:($('#uploadCandidate')?.files?.[0]?.type.startsWith('video/')||/\.(mp4|webm)(?:[?#]|$)/i.test(media_url))?'video':'image',
-   media_url,source_url,
-   creator_credit:String(fd.get('creator_credit')).trim(),
-   rights_reference:String(fd.get('rights_reference')).trim(),
-   tags:cleanTags(fd.get('tags')),published:instant,review_status:instant?'approved':'draft'
-  };
-  const {error}=await db().from('community_posts').insert(row);
-  if(error){
-   if(instant)return msg('Post not published: '+error.message+'. You must be fully verified, and this must be your completed Bunny upload with a matching rights reference.');
-   return msg(error.message);
-  }
-  e.target.reset();
-  msg(instant?'Published to your feed.':'Saved privately. Public adult-media publishing requires verified House Creator status.');
-  if(instant)setTimeout(()=>document.querySelector('[data-route="feed"]')?.click(),350);
- }
+  const form=e.currentTarget,submit=form.querySelector('[type="submit"]');
+  if(submit.disabled)return;const values=new FormData(form);
+  const rights=String(values.get('rights_reference')||'').trim();
+  const f=fileInput.files?.[0];
+  let url=safeUrl(values.get('media_url'));
+  if(!f&&!url)return msg('Choose a media file or use an existing Bunny URL.');
+  if(!values.get('permission'))return msg('Confirm written permission and age/consent records before saving.');
+  const rawLink=String(values.get('source_url')||'').trim(),source=rawLink?safeUrl(rawLink):null;
+  if(rawLink&&!source)return msg('The optional creator link must be an HTTPS URL.');
+  submit.disabled=true;const status=$('#postProgress');
+  try{
+   if(f){
+    if(!window.LUSTSINO_UPLOAD)throw Error('File uploader is not loaded. Refresh the page.');
+    const result=await window.LUSTSINO_UPLOAD.upload(f,rights,message=>{if(status)status.textContent=message});
+    url=result.url;
+   }
+   const instant=profile?.creator_status==='verified'||!!core()?.admin;
+   const row={
+    owner_id:viewer.id,
+    title:String(values.get('title')||'').trim(),
+    description:String(values.get('description')||'').trim(),
+    media_type:f?(f.type.startsWith('video/')?'video':'image'):/\.(mp4|webm)(?:[?#]|$)/i.test(url)?'video':'image',
+    media_url:url,source_url:source,
+    creator_credit:String(values.get('creator_credit')||'').trim(),
+    rights_reference:rights,tags:cleanTags(values.get('tags')),
+    published:instant,review_status:instant?'approved':'draft'
+   };
+   const {error}=await db().from('community_posts').insert(row);
+   if(error)throw Error(error.message+'. Public publishing requires a verified House Creator and a completed Bunny upload with matching rights reference.');
+   if(previewObject){URL.revokeObjectURL(previewObject);previewObject=null}
+   form.reset();
+   if(status)status.textContent=instant?'Published to the feed.':'Saved as a private draft in your Studio.';
+   if(instant){
+    setTimeout(()=>{document.querySelector('[data-route="feed"]')?.click();setTimeout(()=>loadFeed(),100)},550);
+   }
+   else setTimeout(()=>renderMyDrafts(),700);
+  }catch(error){
+   if(status)status.textContent=error.message||'Publishing failed.';
+   msg(error.message||'Publishing failed.');
+  }finally{submit.disabled=false;}
+ };
 }
 function renderGameTool(){const root=$('#memberToolBody');const approved=core()?.state?.media?.filter(m=>m.published===true)||[];const options=approved.map(m=>`<option value="${esc(m.id)}">${esc(m.name)}</option>`).join('');root.innerHTML=`<div class="member-card"><span class="overline">MEMBER GAME BUILDER</span><h2>Make a new interactive game</h2><p>Choose a mode, add tags and configure its outcomes. All players can save drafts. Verified House Creators publish complete games automatically when every media assignment meets the existing safeguards.</p><form id="submitGame" class="stack-form"><label>Game title<input name="title" maxlength="90" required></label><label>Description<input name="description" maxlength="240" required></label><label>Game mode<select id="memberGameType" name="type">${[['hotspots','Circle Paths'],['wheel','Roulette'],['cards','Shuffle'],['duel','This or That'],['prompts','Timed prompts'],['doors','Mystery Doors'],['tiles','Lucky Tiles'],['special','The LUSTSINO Special']].map(([v,t])=>`<option value="${v}" ${v===chosenGameType?'selected':''}>${t}</option>`).join('')}</select></label><label>Tags (comma or hashtag separated)<input name="tags" placeholder="creative, challenge, arcade"></label><div id="memberGameEditor"></div><button class="button primary" type="submit">Save game draft ↗</button></form></div>`;$('#memberGameType').onchange=e=>{chosenGameType=e.target.value;renderMemberEditor(approved)};renderMemberEditor(approved);
  $('#submitGame').onsubmit=async e=>{e.preventDefault();const form=new FormData(e.target),type=form.get('type'),config=makeGameConfig(type);if(!config)return msg('Complete the configuration first.');const title=String(form.get('title')).trim();const slug='member-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,8);const instant=profile?.creator_status==='verified'||!!core()?.admin;const record={title,slug,description:String(form.get('description')||''),type,author_id:viewer.id,tags:cleanTags(form.get('tags')),published:instant,review_status:instant?'approved':'draft',featured:false,symbol:'◇',sort_order:100,config};let {error}=await db().from('experiences').insert(record);if(error&&instant){const retry=await db().from('experiences').insert({...record,published:false,review_status:'draft'});if(!retry.error){msg('Game saved privately. Public release requires every media and creator record to meet the publishing checks.');e.target.reset();chosenGameType='hotspots';renderGameTool();return;}return msg('Could not save game: '+retry.error.message)}if(error)return msg(error.message);msg(instant?'Game published to the arcade.':'Game draft saved in your Studio.');e.target.reset();chosenGameType='hotspots';renderGameTool()}
