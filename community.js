@@ -486,6 +486,23 @@ function renderMemberEditor(approved){
  };
  $('#roundSeconds').oninput=e=>{node.preview_seconds=Number(e.target.value);$('#roundSecondsLabel').textContent=e.target.value+' sec'};
  const canvas=$('#memberCanvas');
+ const roundPhoto=canvas?.querySelector('.member-round-photo');
+ if(roundPhoto){
+  const fitRoundPhoto=()=>{
+   const ratio=(roundPhoto.naturalWidth||3)/(roundPhoto.naturalHeight||4);
+   const maxWidth=Math.min(720,root.clientWidth||720);
+   const maxHeight=Math.max(230,window.innerHeight*.68);
+   const width=Math.max(130,Math.min(maxWidth,maxHeight*ratio));
+   canvas.style.setProperty('width',width+'px','important');
+   canvas.style.height='auto';
+   roundPhoto.style.width='100%';
+   roundPhoto.style.maxWidth='100%';
+   roundPhoto.style.maxHeight='none';
+   roundPhoto.style.height='auto';
+  };
+  roundPhoto.addEventListener('load',fitRoundPhoto,{once:true});
+  if(roundPhoto.complete && roundPhoto.naturalWidth>0)fitRoundPhoto();
+ }
  canvas.onclick=e=>{
   if(e.target.closest('button')||node.spots.length>=8||end)return;
   if(!visual){msg('Upload a round image before placing circles.');return;}
