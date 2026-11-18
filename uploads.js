@@ -10,7 +10,7 @@
   if(!Number.isFinite(file.size)||file.size<1||file.size>maxByType(file.type))
    throw Error('This file exceeds the upload size limit.');
   const rightsRef=String(rightsReference||'').trim();
-  if(rightsRef.length<3)throw Error('Enter the documented rights/permission reference.');
+  // The server generates an upload tracking ID when no reference is supplied.
   if(!client()||!api())throw Error('The file service is not available.');
   const {data:{session}}=await client().auth.getSession();
   if(!session)throw Error('Sign in to upload.');
@@ -46,7 +46,7 @@
   const stored=await call({action:'finalize',uploadId:grant.uploadId});
   if(!stored.url)throw Error('File was stored, but a usable Bunny CDN hostname is not configured.');
   onProgress('Upload complete.');
-  return {url:stored.url,uploadId:stored.uploadId,mime:prepared.type,originalName:file.name};
+  return {url:stored.url,uploadId:stored.uploadId,rightsRef:stored.rightsRef,mime:prepared.type,originalName:file.name};
  }
  window.LUSTSINO_UPLOAD={upload};
 })();
