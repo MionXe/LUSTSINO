@@ -99,7 +99,7 @@
   '<p>Edit public copy, homepage art and the audio queue. Changes are saved to Supabase and applied to all visitors.</p>'+
   '<form id="siteDesignerForm" class="site-designer-form">'+fields+
   '<label>Upload image/GIF to a site slot<select id="siteAssetTarget"><option value="hero_image_url">Hero background</option><option value="community_banner_url">Community section image</option><option value="logo_image_url">Site logo</option></select></label>'+  '<label>Image or GIF file<input type="file" id="siteHeroFile" accept="image/png,image/jpeg,image/webp,image/gif"></label>'+
-  '<label>Rights/license reference for any new upload<input id="siteHeroRights" placeholder="Required for upload"></label>'+
+
   '<p id="siteUploadStatus" aria-live="polite"></p><div class="studio-actions"><button class="button primary" type="submit">Save site changes</button></div></form>'+
   '<section class="site-playlist-editor"><h3>Background soundtrack</h3>'+
   '<label>Play mode<select id="sitePlaylistMode"><option value="single"'+(settings.playlist_mode==='single'?' selected':'')+'>Repeat one track</option>'+
@@ -109,7 +109,7 @@
   '<label>On <input type="checkbox" data-track-active="'+escape(t.id)+'"'+(t.active?' checked':'')+'></label>'+
   '<button type="button" class="button subtle" data-track-remove="'+escape(t.id)+'">Remove</button></div>').join('')+'</div>'+
   '<form id="siteTrackForm" class="site-designer-form"><label>Track name<input name="title" required maxlength="120"></label>'+
-  '<label>Existing MP3 HTTPS URL (optional)<input type="url" name="audio_url" placeholder="https://.../soundtrack.mp3"></label>'+  '<label>Or upload an MP3<input type="file" id="siteTrackFile" accept="audio/mpeg,.mp3"></label>'+  '<label>Audio license or permission reference<input id="siteTrackRights" placeholder="Required to upload"></label>'+
+  '<label>Existing MP3 HTTPS URL (optional)<input type="url" name="audio_url" placeholder="https://.../soundtrack.mp3"></label>'+  '<label>Or upload an MP3<input type="file" id="siteTrackFile" accept="audio/mpeg,.mp3"></label>'+
   '<label>Music credit / attribution<input name="credit" maxlength="200" placeholder="Creator, license"></label>'+
   '<label>Queue order<input type="number" name="sort_order" min="0" max="10000" value="10"></label>'+
   '<button type="submit" class="button secondary">Add soundtrack</button></form></section></div>';
@@ -123,7 +123,7 @@
     const target=$('#siteAssetTarget').value;
     let image=updates.find(x=>x.key===target);
     const f=$('#siteHeroFile').files?.[0];
-    if(f){const status=$('#siteUploadStatus');const ref=$('#siteHeroRights').value.trim();
+    if(f){const status=$('#siteUploadStatus');const ref='';
      if(f.type.startsWith('video/'))throw Error('Use an image or GIF for this site slot.');
      const out=await window.LUSTSINO_UPLOAD.upload(f,ref,x=>status.textContent=x);
      image.value=out.url;
@@ -151,7 +151,7 @@
   $('#siteTrackForm').onsubmit=async e=>{
    e.preventDefault();const form=new FormData(e.currentTarget);
    let url=allowedUrl(form.get('audio_url'));const file=$('#siteTrackFile')?.files?.[0];
-   try{if(file){const result=await window.LUSTSINO_UPLOAD.upload(file,$('#siteTrackRights')?.value||'',text=>core().notify(text));url=result.url;}}
+   try{if(file){const result=await window.LUSTSINO_UPLOAD.upload(file,'',text=>core().notify(text));url=result.url;}}
    catch(error){return core().notify(error.message||'Audio upload failed.')}
    if(!url)return core().notify('Enter an HTTPS audio URL or choose an MP3 to upload.');
    const payload={title:String(form.get('title')).trim(),audio_url:url,
