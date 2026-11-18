@@ -11,7 +11,8 @@ const safeUrl=s=>{try{const u=new URL(s);return u.protocol==='https:'?u.href:''}
 const policyVersion='2026-11-17';
 let viewer=null,profile=null,selectedPost=null,gameRun=null,feedPosts=[],chosenGameType='hotspots';
 let feedOffset=0,feedHasMore=true,feedLoading=false,feedObserver=null;
-let newGame={type:'hotspots',title:'',description:'',tags:[],nodes:[],currentNode:0,mediaId:''};
+let newGame={type:'hotspots',title:'',description:'',tags:[],nodes:[],currentNode:0,mediaId:'',outcomes:{}};
+let gameFormDraft={title:'',description:'',tags:'',cover_url:'',rights_ref:''};
 const initNode=i=>({round:i+1,title:`Round ${i+1}`,subtitle:'Choose one numbered spot. Follow only the region you selected.',mediaId:'',preview_seconds:5,spots:[{label:'A',x:35,y:45,w:20,h:18,shape:'oval',next:`round_${String(i+2).padStart(2,'0')}`},{label:'B',x:67,y:65,w:15,h:20,shape:'oval',next:`round_${String(i+2).padStart(2,'0')}`}]});
 
 function init(){
@@ -31,7 +32,7 @@ function init(){
 }
 let attempts=0;async function ready(){if(!db()){if(++attempts<24)setTimeout(ready,1200);return}const client=db();client.auth.onAuthStateChange((event)=>{setTimeout(loadIdentity,100);if(event==='PASSWORD_RECOVERY')setTimeout(showPasswordRecovery,250)});await loadIdentity();if(core()?.state?.route==='feed')await loadFeed();}
 async function loadIdentity(){const client=db();if(!client)return;const {data:{user},error}=await client.auth.getUser();viewer=error?null:user;profile=null;if(viewer){const {data:p}=await client.from('member_profiles').select('*').eq('user_id',viewer.id).maybeSingle();profile=p;if(p&&sessionStorage.getItem('lustsino_pending_terms')==='yes'){const {error:termsError}=await client.rpc('accept_lustsino_terms',{p_version:policyVersion});if(!termsError){sessionStorage.removeItem('lustsino_pending_terms');profile={...p,terms_version:policyVersion}}}}
- if(core()?.state?.route==='account')renderAccount();if(core()?.state?.route==='community')renderCommunity();}
+ if(core()?.state?.route==='account')renderAccount();if(core()?.state?.route==='community'&&$('#communityPanel')?.dataset.viewerId!==viewer?.id)renderCommunity();}
 
 function showPasswordRecovery(){const root=$('#memberPanel');if(!root||!db())return;core()?.state?.route!=='account'&&document.querySelector('[data-route="account"]')?.click();setTimeout(()=>{const el=$('#memberPanel');if(!el)return;el.insertAdjacentHTML('afterbegin',`<section class="member-card" id="recoveryPanel"><h2>Set a new password</h2><form id="changePassword"><label>New password<input name="password" type="password" autocomplete="new-password" minlength="12" required></label><label>Confirm password<input name="confirm" type="password" autocomplete="new-password" minlength="12" required></label><button class="button primary">Update password</button></form></section>`);$('#changePassword').onsubmit=async e=>{e.preventDefault();const f=new FormData(e.target);if(f.get('password')!==f.get('confirm'))return msg('Passwords do not match.');const {error}=await db().auth.updateUser({password:String(f.get('password'))});if(error)return msg(error.message);$('#recoveryPanel')?.remove();msg('Password updated.')};},300)}
 function validPlayerEmail(s){return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(s||'').trim())}
@@ -155,8 +156,21 @@ async function loadLeaderboard(){
 }
 function ensureGate(){if(!viewer)return 'Sign in to publish content or build games.';if(profile?.terms_version!==policyVersion)return 'Your account must accept the latest Terms. Sign out and sign in again after accepting.';return ''}
 function renderCommunity(){let root=$('#communityPanel');if(!root)return;const warning=ensureGate();if(warning){root.innerHTML=`<div class="member-card"><h2>Member Studio</h2><p>${esc(warning)}</p><button class="button primary" data-route="account">Go to account ↗</button></div>`;return}
- root.innerHTML=`<div class="member-tool-tabs"><button class="active" data-tool="post">Submit a post</button><button data-tool="game">Create a game</button><button data-tool="mine">My drafts</button>${core()?.admin?'<button data-tool="review">Moderate</button>':''}</div><div id="memberToolBody"></div>`;$all('[data-tool]',root).forEach(b=>b.onclick=()=>{$all('[data-tool]',root).forEach(x=>x.classList.toggle('active',x===b));renderTool(b.dataset.tool)});renderTool('post')}
-function renderTool(tool){if(tool==='post')renderPostTool();else if(tool==='game')renderGameTool();else if(tool==='mine')renderMyDrafts();else if(tool==='review')renderReviewTool()}
+ if(root.dataset.viewerId===viewer?.id&&$('#memberToolBody',root))return;
+ root.dataset.viewerId=viewer.id;
+ root.innerHTML=`<div class="member-tool-tabs"><button class="active" data-tool="post">Create post</button><button data-tool="game">Build a game</button><button data-tool="mine">My drafts</button>${core()?.admin?'<button data-tool="review">Moderate</button>':''}</div><div id="memberToolBody"></div>`;$all('[data-tool]',root).forEach(b=>b.onclick=()=>{$all('[data-tool]',root).forEach(x=>x.classList.toggle('active',x===b));renderTool(b.dataset.tool)});renderTool('post')}
+function captureGameForm(){
+ const form=$('#submitGame');if(!form)return;
+ for(const key of ['title','description','tags']){const input=form.elements.namedItem(key);if(input)gameFormDraft[key]=input.value}
+ const rights=$('#gameRights');if(rights)gameFormDraft.rights_ref=rights.value;
+}
+function renderTool(tool){
+ captureGameForm();
+ if(tool==='post')renderPostTool();
+ else if(tool==='game')renderGameTool();
+ else if(tool==='mine')renderMyDrafts();
+ else if(tool==='review')renderReviewTool();
+}
 function renderPostTool(){
  const root=$('#memberToolBody');if(!root)return;
  root.innerHTML='<div class="member-card member-compose"><span class="overline">CREATE FOR THE FEED</span><h2>Share a moment</h2>'+
