@@ -10,6 +10,7 @@ const cleanTags=s=>[...new Set(String(s||'').toLowerCase().split(/[\s,#]+/).map(
 const safeUrl=s=>{try{const u=new URL(s);return u.protocol==='https:'?u.href:''}catch{return ''}};
 const policyVersion='2026-11-17';
 let viewer=null,profile=null,selectedPost=null,gameRun=null,feedPosts=[],chosenGameType='hotspots';
+let feedOffset=0,feedHasMore=true,feedLoading=false,feedObserver=null;
 let newGame={type:'hotspots',title:'',description:'',tags:[],nodes:[],currentNode:0,mediaId:''};
 const initNode=i=>({round:i+1,title:`Round ${i+1}`,subtitle:'Choose one numbered spot. Follow only the region you selected.',mediaId:'',preview_seconds:5,spots:[{label:'A',x:35,y:45,w:20,h:18,shape:'oval',next:`round_${String(i+2).padStart(2,'0')}`},{label:'B',x:67,y:65,w:15,h:20,shape:'oval',next:`round_${String(i+2).padStart(2,'0')}`}]});
 
@@ -23,6 +24,8 @@ function init(){
  $all('[data-route="search"]').forEach(b=>b.addEventListener('click',()=>setTimeout(renderSearch,20)));
  document.addEventListener('click',e=>{const f=e.target.closest('[data-route="feed"]');if(f)setTimeout(loadFeed,20);const r=e.target.closest('[data-route="community"]');if(r)setTimeout(renderCommunity,20)});
  const search=$('#communitySearch');search?.addEventListener('input',renderSearch);
+ $('#feedRefresh')?.addEventListener('click',()=>loadFeed());
+ document.addEventListener('visibilitychange',()=>{if(document.hidden)$all('#communityFeed video').forEach(v=>v.pause())});
  newGame.nodes=[initNode(0),initNode(1),{round:3,title:'Final reveal',subtitle:'Your surprise',mediaId:'',seconds:15,spots:[]}];
  setTimeout(ready,500);
 }
@@ -70,8 +73,43 @@ async function renderCreatorUpgrade(){const root=$('#creatorUpgrade');if(!root||
  $('#creatorApplication').onsubmit=async e=>{e.preventDefault();const f=new FormData(e.target);const rawUrl=String(f.get('portfolio_url')||'').trim();const url=rawUrl?safeUrl(rawUrl):null;if(rawUrl&&!url)return msg('Enter a valid HTTPS URL or leave it blank.');const {error}=await db().from('creator_applications').insert({user_id:viewer.id,portfolio_url:url,note:String(f.get('note')||'').slice(0,1000)});if(error)return msg(error.message);msg('Creator application submitted.');renderCreatorUpgrade()};
 }
 function renderSearch(){const root=$('#searchResults');if(!root)return;const q=($('#communitySearch')?.value||'').trim().replace(/^#/,'').toLowerCase(),games=(core()?.state?.experiences||[]).filter(g=>g.published!==false);const matches=games.filter(g=>!q||[g.title,g.description,g.type,...(g.tags||[])].join(' ').toLowerCase().includes(q));root.innerHTML=matches.map(g=>`<button class="search-card" data-start="${esc(g.id)}"><img src="assets/covers/${['wheel','cards','hotspots','duel','prompts','doors','tiles'].includes(g.type)?g.type:'wheel'}.webp" alt="" loading="lazy"><strong>${esc(g.title)}</strong><small>${esc(g.description||g.type)}</small><span>${(g.tags||[]).map(t=>'#'+esc(t)).join(' ')}</span></button>`).join('')||'<p>No matching games yet.</p>';const tags=[...new Set(games.flatMap(g=>g.tags||[]))].slice(0,15);$('#trendingTags').innerHTML=tags.map(t=>`<button class="tag-chip" data-tag="${esc(t)}">#${esc(t)}</button>`).join('')||'<span class="micro-note">New tags appear as creators publish their games.</span>';$all('[data-tag]',$('#trendingTags')).forEach(b=>b.onclick=()=>{$('#communitySearch').value=b.dataset.tag;renderSearch()})}
-async function loadFeed(){const root=$('#communityFeed');if(!root)return;root.innerHTML='<div class="feed-message">Loading published creator posts…</div>';const client=db();if(!client){root.innerHTML='<div class="feed-message">Connect Supabase to load moderated community posts.</div>';return}const {data,error}=await client.from('community_posts').select('id,title,description,creator_credit,source_url,media_url,media_type,tags,created_at,owner_id').eq('published',true).eq('review_status','approved').order('created_at',{ascending:false}).limit(45);if(error){root.innerHTML=`<p>${esc(error.message)}</p>`;return}feedPosts=data||[];if(!feedPosts.length){root.innerHTML=`<div class="feed-empty"><img src="assets/covers/doors.webp" alt=""><div><h2>Creator spotlight starts here.</h2><p>No public posts yet. Verified House Creators can upload and publish their own authorized Bunny media immediately.</p><button class="button primary" data-route="community">Submit a post ↗</button></div></div>`;return}
- root.innerHTML=feedPosts.map((p,i)=>`<article class="feed-reel" data-reel="${i}" aria-label="Media post ${i+1}"><div class="feed-stage">${p.media_type==='video'?`<video src="${esc(safeUrl(p.media_url))}" preload="none" playsinline controls></video>`:`<img src="${esc(safeUrl(p.media_url))}" alt="${esc(p.title)}" loading="lazy">`}</div><div class="feed-meta"><span class="overline">${i+1} / ${feedPosts.length} · CREATOR DISCOVERY</span><h2>${esc(p.title)}</h2><p>${esc(p.description||'')}</p><p class="feed-credit">${esc(p.creator_credit||'Creator credited')}</p><div class="tag-list">${(p.tags||[]).map(t=>`<button class="tag-chip" data-feed-tag="${esc(t)}">#${esc(t)}</button>`).join('')}</div><div class="reel-actions"><button class="reel-like" data-like="${esc(p.id)}" aria-label="Like post">♡<small>Like</small></button><button data-share="${esc(p.id)}" aria-label="Share post">↗<small>Share</small></button><button data-report-post="${esc(p.id)}" aria-label="Report post">⚑<small>Report</small></button>${safeUrl(p.source_url)?`<a href="${esc(safeUrl(p.source_url))}" target="_blank" rel="noopener noreferrer">✦<small>Creator</small></a>`:''}</div></div></article>`).join('');
+async function loadFeed({append=false}={}){
+ const root=$('#communityFeed'),pager=$('#feedPagination');if(!root||!db()||feedLoading)return;
+ feedLoading=true;
+ if(!append){feedOffset=0;feedHasMore=true;feedPosts=[];feedObserver?.disconnect();root.innerHTML='<div class="feed-message">Loading the latest posts…</div>';}
+ const pageSize=24;
+ const {data,error}=await db().from('community_posts')
+  .select('id,title,description,creator_credit,source_url,media_url,media_type,tags,created_at,owner_id')
+  .eq('published',true).eq('review_status','approved')
+  .order('created_at',{ascending:false}).range(feedOffset,feedOffset+pageSize-1);
+ feedLoading=false;
+ if(error){if(!append)root.innerHTML='<p class="feed-message">'+esc(error.message)+'</p>';return}
+ const rows=data||[];
+ feedPosts=append?feedPosts.concat(rows):rows;
+ feedOffset+=rows.length;
+ feedHasMore=rows.length===pageSize;
+ if(!feedPosts.length){
+  root.innerHTML='<div class="feed-empty"><img src="assets/covers/doors.webp" alt=""><div><h2>Your feed starts here</h2><p>No creator posts yet. Be the first to share an authorized image, GIF or short video.</p><button class="button primary" data-route="community">＋ Create post</button></div></div>';
+  if(pager)pager.innerHTML='';return;
+ }
+ const markup=rows.map((p,i)=>{
+  const url=safeUrl(p.media_url),posted=p.created_at?new Date(p.created_at).toLocaleDateString():'';const artist=p.creator_credit||'Creator';
+  return '<article class="feed-reel" data-reel="'+esc(p.id)+'" aria-label="'+esc(p.title)+'">'+
+    '<header class="feed-post-header"><span class="feed-avatar">✦</span><div class="feed-post-by"><strong>'+esc(artist)+'</strong><small>'+esc(posted)+'</small></div><button class="feed-post-more" data-report-post="'+esc(p.id)+'" aria-label="Report this post">•••</button></header>'+
+    '<div class="feed-stage">'+(p.media_type==='video'?
+      '<video src="'+esc(url)+'" preload="metadata" muted playsinline loop controls></video>':
+      '<img src="'+esc(url)+'" alt="'+esc(p.title)+'" loading="lazy">')+'</div>'+
+    '<div class="feed-actions"><button type="button" class="reel-like" data-like="'+esc(p.id)+'" aria-label="Like">♡ <span>Like</span></button>'+
+     '<button type="button" data-share="'+esc(p.id)+'" aria-label="Share">↗ <span>Share</span></button>'+
+     '<button type="button" data-report-post="'+esc(p.id)+'" aria-label="Report">⚑ <span>Report</span></button>'+
+     (safeUrl(p.source_url)?'<a href="'+esc(safeUrl(p.source_url))+'" target="_blank" rel="noopener noreferrer">✦ Creator page</a>':'')+'</div>'+
+    '<div class="feed-meta"><p class="feed-caption"><strong>'+esc(artist)+'</strong> '+esc(p.title)+'</p>'+
+    (p.description?'<p>'+esc(p.description)+'</p>':'')+
+    '<div class="tag-list">'+(p.tags||[]).map(tag=>'<button class="tag-chip" data-feed-tag="'+esc(tag)+'">#'+esc(tag)+'</button>').join('')+'</div></div></article>';
+ }).join('');
+ if(append)root.insertAdjacentHTML('beforeend',markup);else root.innerHTML=markup;
+ if(pager){pager.innerHTML=feedHasMore?'<button type="button" class="button secondary" id="feedLoadMore">Load more posts ↓</button>':
+ '<p class="feed-end">You’re all caught up.</p>';const more=$('#feedLoadMore');if(more)more.onclick=()=>loadFeed({append:true});}
  $all('[data-like]',root).forEach(b=>b.onclick=()=>toggleLike(b));
  $all('[data-report-post]',root).forEach(button=>button.onclick=()=>{
   const postId=button.dataset.reportPost;
@@ -94,7 +132,18 @@ async function loadFeed(){const root=$('#communityFeed');if(!root)return;root.in
   };
   dialog.showModal();
  });
-$all('[data-share]',root).forEach(b=>b.onclick=()=>{const url=location.origin+location.pathname+'#feed';navigator.share?.({title:'LUSTSINO',url}).catch(()=>{})||navigator.clipboard?.writeText(url).then(()=>msg('Feed link copied'))});$all('[data-feed-tag]',root).forEach(b=>b.onclick=()=>{core().state.route='search';$('[data-route="search"]')?.click();$('#communitySearch').value=b.dataset.feedTag;renderSearch()})}
+$all('[data-share]',root).forEach(b=>b.onclick=()=>{const url=location.origin+location.pathname+'#feed';navigator.share?.({title:'LUSTSINO',url}).catch(()=>{})||navigator.clipboard?.writeText(url).then(()=>msg('Feed link copied'))});$all('[data-feed-tag]',root).forEach(b=>b.onclick=()=>{core().state.route='search';$('[data-route="search"]')?.click();$('#communitySearch').value=b.dataset.feedTag;renderSearch()});
+ feedObserver?.disconnect();
+ feedObserver=new IntersectionObserver(entries=>{
+  entries.forEach(entry=>{
+   const video=entry.target;
+   if(document.hidden || !$('#view-feed')?.classList.contains('show') || entry.intersectionRatio<.60){video.pause();return}
+   video.muted=true;video.playsInline=true;
+   video.play().catch(()=>{});
+  });
+ },{threshold:[0,.25,.60,.9]});
+ $all('.feed-stage video',root).forEach(video=>feedObserver.observe(video));
+}
 async function toggleLike(b){if(!viewer)return msg('Sign in with a player account to save reactions.');const post_id=b.dataset.like;const {data}=await db().from('post_reactions').select('post_id').eq('post_id',post_id).eq('user_id',viewer.id).maybeSingle();let result;if(data){result=await db().from('post_reactions').delete().eq('user_id',viewer.id).eq('post_id',post_id)}else{result=await db().from('post_reactions').insert({post_id,user_id:viewer.id})}if(result.error)return msg(result.error.message);b.classList.toggle('active',!data);b.firstChild.textContent=data?'♡':'♥'}
 async function loadLeaderboard(){
  const root=$('#leaderboardPanel');if(!root)return;root.innerHTML='<p>Opening the Hall of Fame…</p>';
