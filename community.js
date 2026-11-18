@@ -26,6 +26,7 @@ function init(){
  document.addEventListener('click',e=>{const f=e.target.closest('[data-route="feed"]');if(f)setTimeout(loadFeed,20);const r=e.target.closest('[data-route="community"]');if(r)setTimeout(renderCommunity,20)});
  const search=$('#communitySearch');search?.addEventListener('input',renderSearch);
  $('#feedRefresh')?.addEventListener('click',()=>loadFeed());
+ $('#feedCompose')?.addEventListener('click',()=>setTimeout(()=>{renderCommunity();const panel=$('#communityPanel');panel?.querySelectorAll('.member-tool-tabs [data-tool]').forEach(t=>t.classList.toggle('active',t.dataset.tool==='post'));renderTool('post')},50));
  const refreshNotice=document.createElement('button');
  refreshNotice.type='button';refreshNotice.className='feed-new-notice button secondary';
  refreshNotice.textContent='✦ New posts · refresh feed';
