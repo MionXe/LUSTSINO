@@ -209,7 +209,7 @@ function renderPostTool(){
    '<div class="compose-two"><label>Creator credit<input name="creator_credit" required maxlength="120" placeholder="Your creator name"></label>'+
    '<label>Creator page (optional)<input name="source_url" type="url" placeholder="https://..."></label></div>'+
    '<label>Tags<input name="tags" placeholder="portraits, game, reveal"></label>'+
-   '<label>Written permission / rights reference<input name="rights_reference" required minlength="3" maxlength="200" placeholder="Release or creator permission ID"></label>'+
+   '<p class="micro-note">Your uploads receive an internal tracking ID automatically. Publish only content you own or have permission to share.</p>'+
    '<label class="check-row"><input name="permission" type="checkbox" required> I own this media or have documented permission from verified adult participants to submit it.</label>'+
    '<p id="postProgress" aria-live="polite" class="micro-note"></p>'+
    '<button class="button primary compose-publish" type="submit">Publish post ↗</button>'+
@@ -229,10 +229,11 @@ function renderPostTool(){
   e.preventDefault();
   const form=e.currentTarget,submit=form.querySelector('[type="submit"]');
   if(submit.disabled)return;const values=new FormData(form);
-  const rights=String(values.get('rights_reference')||'').trim();
+  let rights='';
   const f=fileInput.files?.[0];
   let url=safeUrl(values.get('media_url'));
-  if(!f&&!url)return msg('Choose a media file or use an existing Bunny URL.');
+  if(!f&&!url)return msg('Choose an image, GIF or video to publish.');
+  if(!f)rights='unverified-existing-url';
   if(!values.get('permission'))return msg('Confirm written permission and age/consent records before saving.');
   const rawLink=String(values.get('source_url')||'').trim(),source=rawLink?safeUrl(rawLink):null;
   if(rawLink&&!source)return msg('The optional creator link must be an HTTPS URL.');
@@ -240,10 +241,10 @@ function renderPostTool(){
   try{
    if(f){
     if(!window.LUSTSINO_UPLOAD)throw Error('File uploader is not loaded. Refresh the page.');
-    const result=await window.LUSTSINO_UPLOAD.upload(f,rights,message=>{if(status)status.textContent=message});
-    url=result.url;
+    const result=await window.LUSTSINO_UPLOAD.upload(f,'',message=>{if(status)status.textContent=message});
+    url=result.url;rights=result.rightsRef||('upload:'+result.uploadId);
    }
-   const instant=profile?.creator_status==='verified'||!!core()?.admin;
+   const instant=!!f&&(profile?.creator_status==='verified'||!!core()?.admin);
    const row={
     owner_id:viewer.id,
     title:String(values.get('title')||'').trim(),
@@ -282,7 +283,7 @@ function renderGameTool(){
  '<label>Game mode<select id="memberGameType" name="type">'+modes.map(([v,t])=>'<option value="'+v+'"'+(v===chosenGameType?' selected':'')+'>'+t+'</option>').join('')+'</select></label>'+
  '<label class="game-wide">Description<input name="description" maxlength="240" required placeholder="What makes it fun?" value="'+esc(gameFormDraft.description)+'"></label>'+
  '<label>Hashtags<input name="tags" placeholder="game,roulette,creative" value="'+esc(gameFormDraft.tags)+'"></label>'+
- '<label>Media permission / rights reference<input id="gameRights" name="rights_ref" maxlength="200" placeholder="Required for new uploads" value="'+esc(gameFormDraft.rights_ref)+'"></label>'+
+ '<p class="game-wide micro-note">Files receive a tracking ID automatically. Only upload media you have permission to use.</p>'+
  '</div>'+
  '<div class="game-cover-editor"><div><h3>Game cover</h3><p>Choose a JPEG, WebP, PNG or GIF for your game icon and preview.</p>'+
  '<input type="file" id="gameCoverFile" accept="image/jpeg,image/png,image/webp,image/gif"></div>'+
@@ -292,7 +293,7 @@ function renderGameTool(){
  '<button type="button" class="button secondary" id="gamePreviewBtn">Preview game</button>'+
  '<button class="button primary" type="submit">Publish / save game ↗</button></div></form></div>';
  for(const field of ['title','description','tags'])root.querySelector('[name="'+field+'"]').oninput=captureGameForm;
- $('#gameRights').oninput=captureGameForm;
+ // No manual file reference is needed: uploaded media is tracked by the server.
  $('#memberGameType').onchange=e=>{captureGameForm();chosenGameType=e.target.value;renderMemberEditor(approved)};
  $('#gameCoverFile').onchange=e=>{
   const f=e.target.files?.[0];if(!f)return;
@@ -320,7 +321,7 @@ function renderGameTool(){
    const file=$('#gameCoverFile')?.files?.[0];
    if(file){
     if(!window.LUSTSINO_UPLOAD)throw Error('Uploader unavailable; refresh the site.');
-    const uploaded=await window.LUSTSINO_UPLOAD.upload(file,gameFormDraft.rights_ref,text=>info.textContent=text);
+    const uploaded=await window.LUSTSINO_UPLOAD.upload(file,'',text=>info.textContent=text);
     gameFormDraft.cover_url=uploaded.url;
    }
    const instant=profile?.creator_status==='verified'||!!core()?.admin;
@@ -405,7 +406,7 @@ function renderMemberEditor(approved){
   $all('[data-choice-seconds]',root).forEach(input=>input.oninput=()=>{const i=Number(input.dataset.choiceSeconds);rows[i].seconds=Number(input.value);$('#choiceSeconds_'+i).textContent=input.value+'s'});
   $all('[data-choice-upload]',root).forEach(input=>input.onchange=async()=>{
    const file=input.files?.[0],i=Number(input.dataset.choiceUpload);
-   if(!file)return;const ref=String($('#gameRights')?.value||'').trim();
+   if(!file)return;const ref='';
    const status=$('[data-choice-status="'+i+'"]',root);
    try{
     if(!window.LUSTSINO_UPLOAD)throw Error('Uploader unavailable; reload the site.');
@@ -463,7 +464,7 @@ function renderMemberEditor(approved){
  $('#memberNodeMedia').onchange=e=>{node.mediaId=e.target.value;node.mediaUrl='';renderMemberEditor(approved)};
  $('#memberNodeFile').onchange=async e=>{
   const file=e.target.files?.[0];if(!file)return;
-  const ref=String($('#gameRights')?.value||'').trim();
+  const ref='';
   try {
    if(!window.LUSTSINO_UPLOAD)throw Error('Uploader unavailable; refresh the page.');
    const result=await window.LUSTSINO_UPLOAD.upload(file,ref,text=>{const el=$('#gameSaveStatus');if(el)el.textContent=text});
