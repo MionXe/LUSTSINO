@@ -45,7 +45,12 @@
   const player=$('#ambientMusic');
   if(!player)return;
   const active=tracks.filter(x=>x.active).sort((a,b)=>a.sort_order-b.sort_order);
-  if(!active.length){const original=$('#defaultMusicAttribution');if(original)original.hidden=false;return;}
+  if(!active.length){
+   const original=$('#defaultMusicAttribution');if(original)original.hidden=false;
+   const defaultAudio=new URL('assets/audio/saavane-tuesday-321650.mp3',location.href).href;
+   if(player.src!==defaultAudio){const wasPlaying=!player.paused;player.src=defaultAudio;player.load();if(wasPlaying)void player.play().catch(()=>{});}
+   player.loop=true;player.onended=null;const label=$('#currentTrackLabel');if(label)label.textContent='';return;
+  }
   const original=$('#defaultMusicAttribution');if(original)original.hidden=true;
   const prev=player.currentSrc||player.src;
   if(playingIndex>=active.length)playingIndex=0;
