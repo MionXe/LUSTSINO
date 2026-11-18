@@ -315,6 +315,9 @@ function renderGameTool(){
   if(submit.disabled)return;
   const type=chosenGameType,config=makeGameConfig(type);
   if(!config)return msg('Complete your game configuration first.');
+  const pending=[...newGame.nodes,...Object.values(newGame.outcomes||{}).flat()].some(media=>media?.previewObjectUrl && !media?.uploadId);
+  if(pending)return msg('An image is still uploading or failed to upload. Retry the affected file before saving.');
+
   const name=gameFormDraft.title.trim();if(!name)return msg('Enter a game title.');
   submit.disabled=true;const info=$('#gameSaveStatus');
   try {
@@ -336,7 +339,7 @@ function renderGameTool(){
     if(retry.error)throw retry.error;
     published=false;
    }else if(error)throw error;
-   if(info)info.textContent=published?'Game published!':'Saved as a private draft. Media assets must be cleared before public release.';
+   if(info)info.textContent=published?'Game published in the arcade!':'Game saved as a private draft. Verify your House Creator status and finish all uploads to publish.';
    if(published){await core().refreshRemote();document.querySelector('[data-route="games"]')?.click();}
    else setTimeout(()=>renderMyDrafts(),700);
   }catch(error){if(info)info.textContent=error.message||'Game could not be saved.';msg(error.message||'Game could not be saved.')}
