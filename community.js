@@ -244,8 +244,78 @@ function renderPostTool(){
   }finally{submit.disabled=false;}
  };
 }
-function renderGameTool(){const root=$('#memberToolBody');const approved=core()?.state?.media?.filter(m=>m.published===true)||[];const options=approved.map(m=>`<option value="${esc(m.id)}">${esc(m.name)}</option>`).join('');root.innerHTML=`<div class="member-card"><span class="overline">MEMBER GAME BUILDER</span><h2>Make a new interactive game</h2><p>Choose a mode, add tags and configure its outcomes. All players can save drafts. Verified House Creators publish complete games automatically when every media assignment meets the existing safeguards.</p><form id="submitGame" class="stack-form"><label>Game title<input name="title" maxlength="90" required></label><label>Description<input name="description" maxlength="240" required></label><label>Game mode<select id="memberGameType" name="type">${[['hotspots','Circle Paths'],['wheel','Roulette'],['cards','Shuffle'],['duel','This or That'],['prompts','Timed prompts'],['doors','Mystery Doors'],['tiles','Lucky Tiles'],['special','The LUSTSINO Special']].map(([v,t])=>`<option value="${v}" ${v===chosenGameType?'selected':''}>${t}</option>`).join('')}</select></label><label>Tags (comma or hashtag separated)<input name="tags" placeholder="creative, challenge, arcade"></label><div id="memberGameEditor"></div><button class="button primary" type="submit">Save game draft ↗</button></form></div>`;$('#memberGameType').onchange=e=>{chosenGameType=e.target.value;renderMemberEditor(approved)};renderMemberEditor(approved);
- $('#submitGame').onsubmit=async e=>{e.preventDefault();const form=new FormData(e.target),type=form.get('type'),config=makeGameConfig(type);if(!config)return msg('Complete the configuration first.');const title=String(form.get('title')).trim();const slug='member-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,8);const instant=profile?.creator_status==='verified'||!!core()?.admin;const record={title,slug,description:String(form.get('description')||''),type,author_id:viewer.id,tags:cleanTags(form.get('tags')),published:instant,review_status:instant?'approved':'draft',featured:false,symbol:'◇',sort_order:100,config};let {error}=await db().from('experiences').insert(record);if(error&&instant){const retry=await db().from('experiences').insert({...record,published:false,review_status:'draft'});if(!retry.error){msg('Game saved privately. Public release requires every media and creator record to meet the publishing checks.');e.target.reset();chosenGameType='hotspots';renderGameTool();return;}return msg('Could not save game: '+retry.error.message)}if(error)return msg(error.message);msg(instant?'Game published to the arcade.':'Game draft saved in your Studio.');e.target.reset();chosenGameType='hotspots';renderGameTool()}
+function renderGameTool(){
+ const root=$('#memberToolBody'),approved=core()?.state?.media?.filter(x=>x.published===true)||[];
+ if(!root)return;
+ const modes=[['hotspots','Circle Paths'],['wheel','Roulette'],['cards','Shuffle'],['duel','This or That'],
+  ['prompts','Timed prompts'],['doors','Mystery Doors'],['tiles','Lucky Tiles'],['special','The LUSTSINO Special']];
+ root.innerHTML='<div class="member-card game-maker"><div class="overline">CREATOR WORKSHOP</div><h2>Build your next game</h2>'+
+ '<p>Create your own rounds and add your media. Every player can save private drafts. Verified House Creators publish games once their media assignments meet the publishing checks.</p>'+
+ '<form id="submitGame" class="stack-form">'+
+ '<div class="game-maker-grid">'+
+ '<label>Game title<input name="title" maxlength="90" required placeholder="Give your game a name" value="'+esc(gameFormDraft.title)+'"></label>'+
+ '<label>Game mode<select id="memberGameType" name="type">'+modes.map(([v,t])=>'<option value="'+v+'"'+(v===chosenGameType?' selected':'')+'>'+t+'</option>').join('')+'</select></label>'+
+ '<label class="game-wide">Description<input name="description" maxlength="240" required placeholder="What makes it fun?" value="'+esc(gameFormDraft.description)+'"></label>'+
+ '<label>Hashtags<input name="tags" placeholder="game,roulette,creative" value="'+esc(gameFormDraft.tags)+'"></label>'+
+ '<label>Media permission / rights reference<input id="gameRights" name="rights_ref" maxlength="200" placeholder="Required for new uploads" value="'+esc(gameFormDraft.rights_ref)+'"></label>'+
+ '</div>'+
+ '<div class="game-cover-editor"><div><h3>Game cover</h3><p>Choose a JPEG, WebP, PNG or GIF for your game icon and preview.</p>'+
+ '<input type="file" id="gameCoverFile" accept="image/jpeg,image/png,image/webp,image/gif"></div>'+
+ '<div id="gameCoverPreview">'+(gameFormDraft.cover_url?'<img src="'+esc(gameFormDraft.cover_url)+'" alt="Current game cover">':'<span>✦ Cover preview</span>')+'</div></div>'+
+ '<div id="memberGameEditor"></div>'+
+ '<div class="game-maker-actions"><p id="gameSaveStatus" role="status" aria-live="polite"></p>'+
+ '<button type="button" class="button secondary" id="gamePreviewBtn">Preview game</button>'+
+ '<button class="button primary" type="submit">Publish / save game ↗</button></div></form></div>';
+ for(const field of ['title','description','tags'])root.querySelector('[name="'+field+'"]').oninput=captureGameForm;
+ $('#gameRights').oninput=captureGameForm;
+ $('#memberGameType').onchange=e=>{captureGameForm();chosenGameType=e.target.value;renderMemberEditor(approved)};
+ $('#gameCoverFile').onchange=e=>{
+  const f=e.target.files?.[0];if(!f)return;
+  const src=URL.createObjectURL(f);const preview=$('#gameCoverPreview');
+  preview.innerHTML='<img src="'+esc(src)+'" alt="Selected game cover">';
+ };
+ renderMemberEditor(approved);
+ $('#gamePreviewBtn').onclick=()=>{
+  captureGameForm();
+  const cfg=makeGameConfig(chosenGameType);
+  if(!cfg)return msg('Complete this game mode first.');
+  core()?.startGame?.({id:'preview-'+Date.now(),title:gameFormDraft.title||'Your preview',
+   description:gameFormDraft.description||'',type:chosenGameType,
+   config:cfg,slug:'draft-preview',published:false,review_status:'draft'});
+ };
+ $('#submitGame').onsubmit=async event=>{
+  event.preventDefault();captureGameForm();
+  const form=event.currentTarget,submit=form.querySelector('[type="submit"]');
+  if(submit.disabled)return;
+  const type=chosenGameType,config=makeGameConfig(type);
+  if(!config)return msg('Complete your game configuration first.');
+  const name=gameFormDraft.title.trim();if(!name)return msg('Enter a game title.');
+  submit.disabled=true;const info=$('#gameSaveStatus');
+  try {
+   const file=$('#gameCoverFile')?.files?.[0];
+   if(file){
+    if(!window.LUSTSINO_UPLOAD)throw Error('Uploader unavailable; refresh the site.');
+    const uploaded=await window.LUSTSINO_UPLOAD.upload(file,gameFormDraft.rights_ref,text=>info.textContent=text);
+    gameFormDraft.cover_url=uploaded.url;
+   }
+   const instant=profile?.creator_status==='verified'||!!core()?.admin;
+   const payload={title:name,slug:'member-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,8),
+    description:gameFormDraft.description.trim(),type,author_id:viewer.id,tags:cleanTags(gameFormDraft.tags),
+    cover_url:gameFormDraft.cover_url||null,published:instant,review_status:instant?'approved':'draft',
+    featured:false,symbol:'◇',sort_order:100,config};
+   let {error}=await db().from('experiences').insert(payload);
+   let published=instant;
+   if(error&&instant){
+    const retry=await db().from('experiences').insert({...payload,published:false,review_status:'draft'});
+    if(retry.error)throw retry.error;
+    published=false;
+   }else if(error)throw error;
+   if(info)info.textContent=published?'Game published!':'Saved as a private draft. Media assets must be cleared before public release.';
+   if(published){await core().refreshRemote();document.querySelector('[data-route="games"]')?.click();}
+   else setTimeout(()=>renderMyDrafts(),700);
+  }catch(error){if(info)info.textContent=error.message||'Game could not be saved.';msg(error.message||'Game could not be saved.')}
+  finally{submit.disabled=false;}
+ };
 }
 function makeGameConfig(type){
  if(type==='special'){
