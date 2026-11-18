@@ -64,7 +64,11 @@
    playingIndex=(playingIndex+1)%active.length;
    const selected=allowedUrl(active[playingIndex].audio_url);
    if(!selected)return;
-   player.src=selected;player.load();void player.play().catch(()=>{});
+   player.src=selected;player.load();
+   const info=$('#currentTrackLabel');
+   if(info)info.textContent='Playing: '+String(active[playingIndex].title||'Soundtrack')+
+     (active[playingIndex].credit?' · '+active[playingIndex].credit:'');
+   void player.play().catch(()=>{});
   };
   let label=$('#currentTrackLabel');
   if(!label){label=document.createElement('span');label.id='currentTrackLabel';label.className='site-now-playing';$('.music-credit')?.appendChild(label);}
