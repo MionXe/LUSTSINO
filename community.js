@@ -13,7 +13,7 @@ let viewer=null,profile=null,selectedPost=null,gameRun=null,feedPosts=[],chosenG
 let feedOffset=0,feedHasMore=true,feedLoading=false,feedObserver=null;
 let newGame={type:'hotspots',title:'',description:'',tags:[],nodes:[],currentNode:0,mediaId:'',outcomes:{}};
 let gameFormDraft={title:'',description:'',tags:'',cover_url:'',rights_ref:''};
-const initNode=i=>({round:i+1,title:`Round ${i+1}`,subtitle:'Choose one numbered spot. Follow only the region you selected.',mediaId:'',preview_seconds:5,spots:[{label:'A',x:35,y:45,w:20,h:18,shape:'oval',next:`round_${String(i+2).padStart(2,'0')}`},{label:'B',x:67,y:65,w:15,h:20,shape:'oval',next:`round_${String(i+2).padStart(2,'0')}`}]});
+const initNode=i=>({round:i+1,title:`Round ${i+1}`,subtitle:'Choose one numbered spot. Follow only the region you selected.',mediaId:'',mediaUrl:'',preview_seconds:5,spots:[{label:'A',x:35,y:45,w:20,h:18,shape:'oval',next:`round_${String(i+2).padStart(2,'0')}`},{label:'B',x:67,y:65,w:15,h:20,shape:'oval',next:`round_${String(i+2).padStart(2,'0')}`}]});
 
 function init(){
  const gate=$('#ageGate'),accept=$('#ageAccept'),check=$('#ageTermsCheck');
@@ -27,7 +27,7 @@ function init(){
  const search=$('#communitySearch');search?.addEventListener('input',renderSearch);
  $('#feedRefresh')?.addEventListener('click',()=>loadFeed());
  document.addEventListener('visibilitychange',()=>{if(document.hidden)$all('#communityFeed video').forEach(v=>v.pause())});
- newGame.nodes=[initNode(0),initNode(1),{round:3,title:'Final reveal',subtitle:'Your surprise',mediaId:'',seconds:15,spots:[]}];
+ newGame.nodes=[initNode(0),initNode(1),{round:3,title:'Final reveal',subtitle:'Your surprise',mediaId:'',mediaUrl:'',seconds:15,spots:[]}];
  setTimeout(ready,500);
 }
 let attempts=0;async function ready(){if(!db()){if(++attempts<24)setTimeout(ready,1200);return}const client=db();client.auth.onAuthStateChange((event)=>{setTimeout(loadIdentity,100);if(event==='PASSWORD_RECOVERY')setTimeout(showPasswordRecovery,250)});await loadIdentity();if(core()?.state?.route==='feed')await loadFeed();}
@@ -335,26 +335,150 @@ function makeGameConfig(type){
           voice,lockMediaAssignments:true,rotateMedia:false};
  }
  if(type==='hotspots'){if(newGame.nodes.length<2)return null;const nodes={};newGame.nodes.forEach((n,i)=>nodes['round_'+String(i+1).padStart(2,'0')]=JSON.parse(JSON.stringify(n)));return {nodes,startNode:'round_01',totalRounds:newGame.nodes.length-1,lockMediaAssignments:true,rotateMedia:false}}
- const c=[];$all('.outcome-row').forEach((row,i)=>{const label=$('[data-outcome-label]',row)?.value||'Mystery '+(i+1),mediaId=$('[data-outcome-media]',row)?.value||'';c.push({label,mediaId,seconds:15,prompt:label})});if(type==='wheel')return{slices:c};if(type==='duel')return{choices:c,rounds:5};if(type==='prompts')return{choices:c,rounds:5};return{choices:c}}
-function renderMemberEditor(approved){const root=$('#memberGameEditor');if(!root)return;
+ const choices=(newGame.outcomes?.[type]||[]).map((entry,i)=>({
+  label:entry.label||'Choice '+(i+1),mediaId:entry.mediaId||'',mediaUrl:entry.mediaUrl||'',
+  seconds:Number(entry.seconds)||15,prompt:entry.label||'Choice '+(i+1)
+ }));
+ if(type==='wheel')return {slices:choices};
+ if(type==='duel'||type==='prompts')return {choices,rounds:5};
+ return {choices};
+}
+function renderMemberEditor(approved){
+ const root=$('#memberGameEditor');if(!root)return;
+ const options=approved.map(m=>'<option value="'+esc(m.id)+'">'+esc(m.name)+'</option>').join('');
+ const approvalSelect=(value)=>'<option value="">Choose cleared media / keep draft</option>'+
+  approved.map(m=>'<option value="'+esc(m.id)+'"'+(m.id===value?' selected':'')+'>'+esc(m.name)+'</option>').join('');
  if(chosenGameType==='special'){
   const starter='Roulette:roulette\nShuffle:shuffle\nChoices:choices\nMystery:mystery\nArcade:arcade\nHighlights:test';
-  root.innerHTML='<div class="member-card" style="padding:16px"><div class="overline">SPECIAL GAME BUILDER</div>'+
-   '<h3>Configure the card themes</h3><p class="micro-note">Choose 4–10 cards. Each line has a label and a published feed hashtag separated by a colon. Use tags already present in your posts.</p>'+
-   '<label>Theme cards<textarea id="memberSpecialTags" rows="7" spellcheck="false">'+esc(starter)+'</textarea></label>'+
-   '<label>Fast-reel speed<select id="memberSpecialSpeed"><option value="180">Very fast (180 ms)</option><option value="210" selected>Fast (210 ms)</option><option value="260">Steady (260 ms)</option><option value="350">Relaxed (350 ms)</option><option value="500">Slow (500 ms)</option></select></label>'+
-   '<h3>Optional narration clips (MP3)</h3><p class="micro-note">Use approved HTTPS media URLs to MP3 files. These clips are played at the matching stage where the browser allows audio.</p>'+
-   [['welcome','Welcome'],['shuffle','Shuffle'],['reel','Reel'],['gallery','Gallery'],['finish','Finish']].map(([id,label])=>
-    '<label>'+label+' MP3 URL<input type="url" data-member-voice="'+id+'" placeholder="https://.../audio.mp3"></label>').join('')+
-   '</div>';
+  root.innerHTML='<section class="game-step-panel"><div class="overline">SPECIAL GAME BUILDER</div><h3>Choose the themes</h3>'+
+    '<p>Add 4–10 labeled cards using <code>Title:hashtag</code>. The reel uses published posts with matching tags.</p>'+
+    '<label>Category cards<textarea id="memberSpecialTags" rows="7" spellcheck="false">'+esc(starter)+'</textarea></label>'+
+    '<label>Reel speed <select id="memberSpecialSpeed">'+[180,210,260,350,500].map(v=>'<option value="'+v+'">'+v+' ms</option>').join('')+'</select></label>'+
+    '<h3>Optional voice clips</h3>'+
+    [['welcome','Welcome'],['shuffle','Shuffle'],['reel','Reel'],['gallery','Gallery'],['finish','Finish']].map(([key,name])=>
+     '<label>'+name+' MP3 URL<input type="url" data-member-voice="'+key+'" placeholder="https://.../audio.mp3"></label>').join('')+
+    '</section>';
   return;
  }
-const opts='<option value="">No media / placeholder</option>'+approved.map(m=>`<option value="${esc(m.id)}">${esc(m.name)}</option>`).join('');if(chosenGameType!=='hotspots'){const number=chosenGameType==='wheel'?8:chosenGameType==='tiles'?9:chosenGameType==='duel'?4:3;root.innerHTML=`<p class="micro-note">Assign authorized media and editable choice labels. You can save the game privately before publication.</p><div class="outcome-list">${Array.from({length:number},(_,i)=>`<div class="outcome-row"><label>Result ${i+1}<input data-outcome-label placeholder="Choice ${i+1}" maxlength="80"></label><label>Approved media<select data-outcome-media>${opts}</select></label></div>`).join('')}</div>`;return}
- const n=newGame.nodes.length,idx=Math.min(newGame.currentNode,n-1),node=newGame.nodes[idx];root.innerHTML=`<div class="path-member-editor"><div class="path-toolbar"><label>Round<select id="memberRound">${newGame.nodes.map((n,i)=>`<option value="${i}" ${idx===i?'selected':''}>${i+1}. ${esc(n.title)}</option>`).join('')}</select></label><label>Length<select id="memberLength">${[5,10,20,30].map(i=>`<option value="${i}" ${n-1===i?'selected':''}>${i} rounds</option>`).join('')}</select></label><button type="button" id="memberGenerate" class="button subtle">Generate path</button></div><p class="micro-note">Move any circle by dragging. Tap empty space to add an oval. The last round is a final reveal.</p><label>Round title<input id="memberNodeTitle" value="${esc(node.title)}"></label><label>Round image<select id="memberNodeMedia">${opts.replace(`value="${esc(node.mediaId)}"`,`value="${esc(node.mediaId)}" selected`)}</select></label><div class="member-hotspot-canvas" id="memberCanvas" style="background-image:${node.mediaId&&approved.find(m=>m.id===node.mediaId)?`linear-gradient(#0002,#0005),url('${esc(approved.find(m=>m.id===node.mediaId).url)}')`:'none'}">${node.spots.map((s,i)=>`<button type="button" class="member-hotspot" data-index="${i}" style="left:${s.x}%;top:${s.y}%;width:${s.w}%;height:${s.h}%;border-radius:${s.shape==='oval'?'50%':'12px'}">${esc(s.label)}</button>`).join('')}<span class="canvas-caption">${node.spots.length?'DRAG TO PLACE · TAP EMPTY AREA TO ADD':'FINAL REVEAL'}</span></div><div class="hotspot-properties">${node.spots.map((s,i)=>`<div class="spot-properties"><span>Spot ${i+1}</span><input data-label="${i}" value="${esc(s.label)}" aria-label="Spot label"><select data-shape="${i}"><option value="oval" ${s.shape==='oval'?'selected':''}>Oval</option><option value="rectangle" ${s.shape==='rectangle'?'selected':''}>Rectangle</option></select><input type="number" data-width="${i}" min="5" max="90" value="${s.w}" aria-label="Width %"><input type="number" data-height="${i}" min="5" max="90" value="${s.h}" aria-label="Height %"><button class="button subtle" type="button" data-remove-hotspot="${i}">×</button></div>`).join('')}</div></div>`;
- $('#memberRound').onchange=e=>{newGame.currentNode=Number(e.target.value);renderMemberEditor(approved)};$('#memberGenerate').onclick=()=>{const amount=Number($('#memberLength').value);newGame.nodes=Array.from({length:amount},(_,i)=>initNode(i));newGame.nodes.push({round:amount+1,title:'Final reveal',subtitle:'Your discovery',mediaId:'',seconds:15,spots:[]});newGame.currentNode=0;renderMemberEditor(approved)};$('#memberNodeTitle').onchange=e=>{node.title=e.target.value};$('#memberNodeMedia').onchange=e=>{node.mediaId=e.target.value;renderMemberEditor(approved)};
- const canvas=$('#memberCanvas');canvas.onclick=e=>{if(e.target.closest('button')||node.spots.length>=8||idx===n-1)return;const r=canvas.getBoundingClientRect(),x=Math.round((e.clientX-r.left)/r.width*100),y=Math.round((e.clientY-r.top)/r.height*100);node.spots.push({x,y,w:18,h:15,shape:'oval',label:String(node.spots.length+1),next:`round_${String(idx+2).padStart(2,'0')}`});renderMemberEditor(approved)};
- $all('.member-hotspot',canvas).forEach(b=>{let drag=false;b.onpointerdown=e=>{e.preventDefault();drag=true;b.setPointerCapture(e.pointerId)};b.onpointermove=e=>{if(!drag)return;const r=canvas.getBoundingClientRect(),s=node.spots[Number(b.dataset.index)];s.x=Math.max(0,Math.min(100,Math.round((e.clientX-r.left)/r.width*100)));s.y=Math.max(0,Math.min(100,Math.round((e.clientY-r.top)/r.height*100)));b.style.left=s.x+'%';b.style.top=s.y+'%'};b.onpointerup=()=>{drag=false}});
- $all('[data-label]',root).forEach(el=>el.onchange=e=>{node.spots[Number(el.dataset.label)].label=e.target.value;renderMemberEditor(approved)});$all('[data-shape]',root).forEach(el=>el.onchange=e=>{node.spots[Number(el.dataset.shape)].shape=e.target.value;renderMemberEditor(approved)});$all('[data-width]',root).forEach(el=>el.onchange=e=>{node.spots[Number(el.dataset.width)].w=Number(e.target.value);renderMemberEditor(approved)});$all('[data-height]',root).forEach(el=>el.onchange=e=>{node.spots[Number(el.dataset.height)].h=Number(e.target.value);renderMemberEditor(approved)});$all('[data-remove-hotspot]',root).forEach(el=>el.onclick=()=>{node.spots.splice(Number(el.dataset.removeHotspot),1);renderMemberEditor(approved)})
+ if(chosenGameType!=='hotspots'){
+  const count=chosenGameType==='wheel'?8:chosenGameType==='tiles'?9:chosenGameType==='duel'?4:3;
+  if(!newGame.outcomes)newGame.outcomes={};
+  const rows=newGame.outcomes[chosenGameType]||[];
+  while(rows.length<count)rows.push({label:'Choice '+(rows.length+1),mediaId:'',mediaUrl:'',seconds:15});
+  newGame.outcomes[chosenGameType]=rows;
+  root.innerHTML='<section class="game-step-panel"><div class="overline">SET UP THE OUTCOMES</div><h3>Media and choices</h3>'+
+   '<p>Upload your own image or GIF for each outcome. Images are saved privately until they meet the public content checks.</p>'+
+   '<div class="outcome-list">'+rows.map((item,i)=>'<div class="outcome-row outcome-card"><header>Outcome '+(i+1)+'</header>'+
+    '<label>Choice label<input data-choice-label="'+i+'" maxlength="80" value="'+esc(item.label||'')+'"></label>'+
+    '<label>Cleared media<select data-choice-media="'+i+'">'+approvalSelect(item.mediaId)+'</select></label>'+
+    '<label>Upload your own media<input type="file" data-choice-upload="'+i+'" accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm"></label>'+
+    (item.mediaUrl?'<div class="outcome-media-preview">'+( /\.(mp4|webm)([?#]|$)/i.test(item.mediaUrl)?'<video src="'+esc(item.mediaUrl)+'" controls muted playsinline></video>':'<img src="'+esc(item.mediaUrl)+'" alt="Outcome media">')+'</div>':'')+
+    '<label>Reveal time: <b id="choiceSeconds_'+i+'">'+(item.seconds||15)+'s</b><input type="range" min="3" max="60" step="1" value="'+(item.seconds||15)+'" data-choice-seconds="'+i+'"></label>'+
+    '<p class="game-file-status" data-choice-status="'+i+'"></p></div>').join('')+'</div></section>';
+  $all('[data-choice-label]',root).forEach(input=>input.oninput=()=>{rows[Number(input.dataset.choiceLabel)].label=input.value});
+  $all('[data-choice-media]',root).forEach(input=>input.onchange=()=>{rows[Number(input.dataset.choiceMedia)].mediaId=input.value});
+  $all('[data-choice-seconds]',root).forEach(input=>input.oninput=()=>{const i=Number(input.dataset.choiceSeconds);rows[i].seconds=Number(input.value);$('#choiceSeconds_'+i).textContent=input.value+'s'});
+  $all('[data-choice-upload]',root).forEach(input=>input.onchange=async()=>{
+   const file=input.files?.[0],i=Number(input.dataset.choiceUpload);
+   if(!file)return;const ref=String($('#gameRights')?.value||'').trim();
+   const status=$('[data-choice-status="'+i+'"]',root);
+   try{
+    if(!window.LUSTSINO_UPLOAD)throw Error('Uploader unavailable; reload the site.');
+    const output=await window.LUSTSINO_UPLOAD.upload(file,ref,text=>{if(status)status.textContent=text});
+    rows[i].mediaUrl=output.url;rows[i].mediaId='';
+    msg('Image uploaded for outcome '+(i+1)+'. Add a cleared media assignment before public release.');
+    renderMemberEditor(approved);
+   }catch(error){if(status)status.textContent=error.message||'Upload failed.'}
+  });
+  return;
+ }
+ if(!newGame.nodes?.length)newGame.nodes=[initNode(0),{round:2,title:'Final reveal',mediaId:'',mediaUrl:'',seconds:15,spots:[]}];
+ const count=newGame.nodes.length,idx=Math.max(0,Math.min(newGame.currentNode||0,count-1));
+ newGame.currentNode=idx;
+ const node=newGame.nodes[idx],end=idx===count-1;
+ const selected=approved.find(m=>m.id===node.mediaId);
+ const visual=safeUrl(node.mediaUrl||selected?.url||'');
+ root.innerHTML='<section class="game-step-panel path-member-editor">'+
+  '<div class="overline">CIRCLE PATHS DESIGNER</div><h3>Build each round visually</h3>'+
+  '<div class="path-toolbar">'+
+   '<button class="button secondary" type="button" id="memberPrevRound"'+(idx===0?' disabled':'')+'>← Previous</button>'+
+   '<label>Round<select id="memberRound">'+newGame.nodes.map((n,i)=>'<option value="'+i+'"'+(i===idx?' selected':'')+'>'+(i+1)+'. '+esc(n.title)+'</option>').join('')+'</select></label>'+
+   '<button class="button secondary" type="button" id="memberNextRound"'+(idx===count-1?' disabled':'')+'>Next →</button>'+
+  '</div><div class="path-toolbar"><label>Total rounds<select id="memberLength">'+[5,10,20,30].map(n=>'<option value="'+n+'"'+(count-1===n?' selected':'')+'>'+n+' rounds</option>').join('')+'</select></label>'+
+  '<button type="button" id="memberGenerate" class="button subtle">Regenerate rounds</button></div>'+
+  '<label>Round title<input id="memberNodeTitle" value="'+esc(node.title)+'" maxlength="90"></label>'+
+  '<div class="round-media-tools"><label>Choose cleared media<select id="memberNodeMedia">'+approvalSelect(node.mediaId)+'</select></label>'+
+  '<label>Add an image/GIF for this round<input id="memberNodeFile" type="file" accept="image/jpeg,image/png,image/webp,image/gif"></label></div>'+
+  (visual?'<p class="micro-note">Previewing your selected round media. Public release requires a cleared media assignment.</p>':'<p class="micro-note">Select an image to place circles on it.</p>')+
+  '<div class="member-hotspot-canvas" id="memberCanvas" style="background-image:'+(visual?'linear-gradient(#0002,#0005),url(&quot;'+esc(visual)+'&quot;)':'none')+'">'+
+  (node.spots||[]).map((spot,i)=>'<button class="member-hotspot" type="button" data-index="'+i+'" style="left:'+spot.x+'%;top:'+spot.y+'%;width:'+spot.w+'%;height:'+spot.h+'%;border-radius:'+(spot.shape==='oval'?'50%':'12px')+'">'+esc(spot.label)+'</button>').join('')+
+  '<span class="canvas-caption">'+(end?'FINAL REVEAL':'DRAG SPOTS · TAP IMAGE TO ADD A CIRCLE')+'</span></div>'+
+  '<div class="round-timing"><label>Reveal duration: <strong id="roundSecondsLabel">'+(node.preview_seconds||5)+' sec</strong>'+
+  '<input id="roundSeconds" type="range" min="2" max="45" step="1" value="'+(node.preview_seconds||5)+'"></label></div>'+
+  '<div class="hotspot-properties">'+(node.spots||[]).map((spot,i)=>
+   '<div class="spot-properties"><strong>Circle '+(i+1)+'</strong>'+
+   '<label>Label<input data-label="'+i+'" value="'+esc(spot.label)+'" aria-label="Circle label"></label>'+
+   '<label>Shape<select data-shape="'+i+'"><option value="oval"'+(spot.shape==='oval'?' selected':'')+'>Oval</option><option value="rectangle"'+(spot.shape==='rectangle'?' selected':'')+'>Rectangle</option></select></label>'+
+   '<label>Width <input type="range" data-width="'+i+'" min="6" max="90" value="'+spot.w+'"></label>'+
+   '<label>Height <input type="range" data-height="'+i+'" min="6" max="90" value="'+spot.h+'"></label>'+
+   '<label>Next round<select data-next="'+i+'">'+newGame.nodes.map((v,j)=>'<option value="round_'+String(j+1).padStart(2,'0')+'"'+(spot.next==='round_'+String(j+1).padStart(2,'0')?' selected':'')+'>'+(j+1)+'. '+esc(v.title)+'</option>').join('')+'</select></label>'+
+   '<button type="button" class="button subtle" data-remove-hotspot="'+i+'">Remove</button></div>').join('')+'</div>'+
+  '</section>';
+ $('#memberRound').onchange=e=>{newGame.currentNode=Number(e.target.value);renderMemberEditor(approved)};
+ $('#memberPrevRound').onclick=()=>{newGame.currentNode=idx-1;renderMemberEditor(approved)};
+ $('#memberNextRound').onclick=()=>{newGame.currentNode=idx+1;renderMemberEditor(approved)};
+ $('#memberGenerate').onclick=()=>{
+  if(!confirm('Regenerate all rounds? This will replace the current circle positions.'))return;
+  const amount=Number($('#memberLength').value);
+  newGame.nodes=Array.from({length:amount},(_,i)=>initNode(i));
+  newGame.nodes.push({round:amount+1,title:'Final reveal',subtitle:'Your discovery',mediaId:'',mediaUrl:'',seconds:15,spots:[]});
+  newGame.currentNode=0;renderMemberEditor(approved);
+ };
+ $('#memberNodeTitle').oninput=e=>{node.title=e.target.value};
+ $('#memberNodeMedia').onchange=e=>{node.mediaId=e.target.value;node.mediaUrl='';renderMemberEditor(approved)};
+ $('#memberNodeFile').onchange=async e=>{
+  const file=e.target.files?.[0];if(!file)return;
+  const ref=String($('#gameRights')?.value||'').trim();
+  try {
+   if(!window.LUSTSINO_UPLOAD)throw Error('Uploader unavailable; refresh the page.');
+   const result=await window.LUSTSINO_UPLOAD.upload(file,ref,text=>{const el=$('#gameSaveStatus');if(el)el.textContent=text});
+   node.mediaUrl=result.url;node.mediaId='';renderMemberEditor(approved);
+   msg('Round '+(idx+1)+' image saved. Add the cleared media assignment before publishing.');
+  }catch(error){msg(error.message||'Round image upload failed.')}
+ };
+ $('#roundSeconds').oninput=e=>{node.preview_seconds=Number(e.target.value);$('#roundSecondsLabel').textContent=e.target.value+' sec'};
+ const canvas=$('#memberCanvas');
+ canvas.onclick=e=>{
+  if(e.target.closest('button')||node.spots.length>=8||end)return;
+  const b=canvas.getBoundingClientRect(),x=Math.round((e.clientX-b.left)/b.width*100),y=Math.round((e.clientY-b.top)/b.height*100);
+  node.spots.push({x,y,w:18,h:15,shape:'oval',label:String(node.spots.length+1),next:'round_'+String(idx+2).padStart(2,'0')});
+  renderMemberEditor(approved);
+ };
+ $all('.member-hotspot',canvas).forEach(button=>{
+  let dragging=false;button.onpointerdown=e=>{dragging=true;button.setPointerCapture(e.pointerId);e.preventDefault()};
+  button.onpointermove=e=>{
+   if(!dragging)return;const bounds=canvas.getBoundingClientRect(),spot=node.spots[Number(button.dataset.index)];
+   spot.x=Math.max(0,Math.min(100,Math.round((e.clientX-bounds.left)/bounds.width*100)));
+   spot.y=Math.max(0,Math.min(100,Math.round((e.clientY-bounds.top)/bounds.height*100)));
+   button.style.left=spot.x+'%';button.style.top=spot.y+'%';
+  };
+  button.onpointerup=()=>{dragging=false};
+  button.onpointercancel=()=>{dragging=false};
+ });
+ for(const field of ['label','shape','width','height','next']){
+  $all('[data-'+field+']',root).forEach(input=>{
+   const index=Number(input.dataset[field]);
+   input.oninput=()=>{
+    if(field==='label')node.spots[index].label=input.value;
+    else if(field==='shape')node.spots[index].shape=input.value;
+    else if(field==='width')node.spots[index].w=Number(input.value);
+    else if(field==='height')node.spots[index].h=Number(input.value);
+    else if(field==='next')node.spots[index].next=input.value;
+    if(field==='label'||field==='shape'||field==='width'||field==='height')renderMemberEditor(approved);
+   };
+  });
+ }
+ $all('[data-remove-hotspot]',root).forEach(button=>button.onclick=()=>{node.spots.splice(Number(button.dataset.removeHotspot),1);renderMemberEditor(approved)});
 }
 async function renderMyDrafts(){
  const root=$('#memberToolBody');
