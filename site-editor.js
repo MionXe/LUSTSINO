@@ -10,7 +10,10 @@
   hero_eyebrow:'Hero eyebrow',hero_caption:'Hero description',hero_image_url:'Hero background image / GIF URL',
   hero_primary_label:'Primary hero button',hero_secondary_label:'Secondary hero button',
   featured_title:'Game-carousel heading',feed_heading:'Feed heading',
-  feed_caption:'Feed subtitle',arcade_caption:'Game-carousel subtitle'
+  feed_caption:'Feed subtitle',arcade_caption:'Game-carousel subtitle',
+  logo_image_url:'Site logo image / GIF URL',community_banner_url:'Community section image / GIF URL',
+  community_heading:'Community section heading',community_description:'Community description',
+  community_button_label:'Community section button label'
  };
  let settings={},tracks=[],playingIndex=0;
  function textSet(selector,value){
@@ -26,6 +29,11 @@
   textSet('#view-home .section-top p',settings.arcade_caption);
   textSet('#view-feed .subheading h1',settings.feed_heading);
   textSet('#view-feed .subheading p',settings.feed_caption);
+  textSet('#view-home .community-showcase h2',settings.community_heading);
+  textSet('#view-home .community-showcase p',settings.community_description);
+  textSet('#view-home .community-showcase .button',settings.community_button_label);
+  if(allowedUrl(settings.logo_image_url))document.querySelectorAll('.identity img').forEach(el=>el.src=allowedUrl(settings.logo_image_url));
+  if(allowedUrl(settings.community_banner_url)&&$('#view-home .community-showcase img'))$('#view-home .community-showcase img').src=allowedUrl(settings.community_banner_url);
   const art=$('#view-home .hero-photo');
   if(art&&allowedUrl(settings.hero_image_url)){
    art.style.backgroundImage='linear-gradient(90deg,#100d1480,#1a0e1442),url("'+allowedUrl(settings.hero_image_url).replace(/"/g,'')+'")';
@@ -37,7 +45,8 @@
   const player=$('#ambientMusic');
   if(!player)return;
   const active=tracks.filter(x=>x.active).sort((a,b)=>a.sort_order-b.sort_order);
-  if(!active.length)return;
+  if(!active.length){const original=$('#defaultMusicAttribution');if(original)original.hidden=false;return;}
+  const original=$('#defaultMusicAttribution');if(original)original.hidden=true;
   const prev=player.currentSrc||player.src;
   if(playingIndex>=active.length)playingIndex=0;
   let next=allowedUrl(active[playingIndex].audio_url);
@@ -73,14 +82,14 @@
   await load();
   const fields=Object.entries(names).map(([k,label])=>
    '<label class="site-edit-field"><span>'+escape(label)+'</span>'+
-   (k==='hero_caption'||k==='feed_caption'||k==='arcade_caption'?
+   (['hero_caption','feed_caption','arcade_caption','community_description'].includes(k)?
     '<textarea name="'+k+'" rows="3" maxlength="900">'+escape(settings[k]||'')+'</textarea>':
-    '<input name="'+k+'" '+(k==='hero_image_url'?'type="url" placeholder="https://...gif or webp"':'type="text"')+' value="'+escape(settings[k]||'')+'" maxlength="900">')+
+    '<input name="'+k+'" '+(['hero_image_url','logo_image_url','community_banner_url'].includes(k)?'type="url" placeholder="https://...gif or webp"':'type="text"')+' value="'+escape(settings[k]||'')+'" maxlength="900">')+
    '</label>').join('');
   root.innerHTML='<div class="site-editor-master"><span class="overline">LUSTSINO MASTERS</span><h2>Site designer</h2>'+
   '<p>Edit public copy, homepage art and the audio queue. Changes are saved to Supabase and applied to all visitors.</p>'+
   '<form id="siteDesignerForm" class="site-designer-form">'+fields+
-  '<label>Hero media file (JPEG, WebP, PNG or GIF)<input type="file" id="siteHeroFile" accept="image/png,image/jpeg,image/webp,image/gif"></label>'+
+  '<label>Upload image/GIF to a site slot<select id="siteAssetTarget"><option value="hero_image_url">Hero background</option><option value="community_banner_url">Community section image</option><option value="logo_image_url">Site logo</option></select></label>'+  '<label>Image or GIF file<input type="file" id="siteHeroFile" accept="image/png,image/jpeg,image/webp,image/gif"></label>'+
   '<label>Rights/license reference for any new upload<input id="siteHeroRights" placeholder="Required for upload"></label>'+
   '<p id="siteUploadStatus" aria-live="polite"></p><div class="studio-actions"><button class="button primary" type="submit">Save site changes</button></div></form>'+
   '<section class="site-playlist-editor"><h3>Background soundtrack</h3>'+
@@ -101,11 +110,12 @@
    try{
     const form=new FormData(e.currentTarget);
     const updates=Object.keys(names).map(key=>({key,value:String(form.get(key)||'').trim()}));
-    let image=updates.find(x=>x.key==='hero_image_url');
-    if(image?.value&&!allowedUrl(image.value))throw Error('Hero image must have a valid HTTPS URL.');
+    for(const entry of updates){if(['hero_image_url','logo_image_url','community_banner_url'].includes(entry.key)&&entry.value&&!allowedUrl(entry.value))throw Error('Image URLs must use HTTPS.');}
+    const target=$('#siteAssetTarget').value;
+    let image=updates.find(x=>x.key===target);
     const f=$('#siteHeroFile').files?.[0];
     if(f){const status=$('#siteUploadStatus');const ref=$('#siteHeroRights').value.trim();
-     if(f.type.startsWith('video/'))throw Error('Use an image or GIF for the hero.');
+     if(f.type.startsWith('video/'))throw Error('Use an image or GIF for this site slot.');
      const out=await window.LUSTSINO_UPLOAD.upload(f,ref,x=>status.textContent=x);
      image.value=out.url;
     }
