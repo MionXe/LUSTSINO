@@ -209,7 +209,7 @@ function renderPostTool(){
    '<div class="compose-two"><label>Creator credit<input name="creator_credit" required maxlength="120" placeholder="Your creator name"></label>'+
    '<label>Creator page (optional)<input name="source_url" type="url" placeholder="https://..."></label></div>'+
    '<label>Tags<input name="tags" placeholder="portraits, game, reveal"></label>'+
-   '<label>Written permission / rights reference<input name="rights_reference" required minlength="3" maxlength="200" placeholder="Release or creator permission ID"></label>'+
+   '<p class="micro-note">Your uploads receive an internal tracking ID automatically. Publish only content you own or have permission to share.</p>'+
    '<label class="check-row"><input name="permission" type="checkbox" required> I own this media or have documented permission from verified adult participants to submit it.</label>'+
    '<p id="postProgress" aria-live="polite" class="micro-note"></p>'+
    '<button class="button primary compose-publish" type="submit">Publish post ↗</button>'+
@@ -229,10 +229,11 @@ function renderPostTool(){
   e.preventDefault();
   const form=e.currentTarget,submit=form.querySelector('[type="submit"]');
   if(submit.disabled)return;const values=new FormData(form);
-  const rights=String(values.get('rights_reference')||'').trim();
+  let rights='';
   const f=fileInput.files?.[0];
   let url=safeUrl(values.get('media_url'));
-  if(!f&&!url)return msg('Choose a media file or use an existing Bunny URL.');
+  if(!f&&!url)return msg('Choose an image, GIF or video to publish.');
+  if(!f)rights='unverified-existing-url';
   if(!values.get('permission'))return msg('Confirm written permission and age/consent records before saving.');
   const rawLink=String(values.get('source_url')||'').trim(),source=rawLink?safeUrl(rawLink):null;
   if(rawLink&&!source)return msg('The optional creator link must be an HTTPS URL.');
@@ -240,10 +241,10 @@ function renderPostTool(){
   try{
    if(f){
     if(!window.LUSTSINO_UPLOAD)throw Error('File uploader is not loaded. Refresh the page.');
-    const result=await window.LUSTSINO_UPLOAD.upload(f,rights,message=>{if(status)status.textContent=message});
-    url=result.url;
+    const result=await window.LUSTSINO_UPLOAD.upload(f,'',message=>{if(status)status.textContent=message});
+    url=result.url;rights=result.rightsRef||('upload:'+result.uploadId);
    }
-   const instant=profile?.creator_status==='verified'||!!core()?.admin;
+   const instant=!!f&&(profile?.creator_status==='verified'||!!core()?.admin);
    const row={
     owner_id:viewer.id,
     title:String(values.get('title')||'').trim(),
@@ -282,7 +283,7 @@ function renderGameTool(){
  '<label>Game mode<select id="memberGameType" name="type">'+modes.map(([v,t])=>'<option value="'+v+'"'+(v===chosenGameType?' selected':'')+'>'+t+'</option>').join('')+'</select></label>'+
  '<label class="game-wide">Description<input name="description" maxlength="240" required placeholder="What makes it fun?" value="'+esc(gameFormDraft.description)+'"></label>'+
  '<label>Hashtags<input name="tags" placeholder="game,roulette,creative" value="'+esc(gameFormDraft.tags)+'"></label>'+
- '<label>Media permission / rights reference<input id="gameRights" name="rights_ref" maxlength="200" placeholder="Required for new uploads" value="'+esc(gameFormDraft.rights_ref)+'"></label>'+
+ '<p class="game-wide micro-note">Files receive a tracking ID automatically. Only upload media you have permission to use.</p>'+
  '</div>'+
  '<div class="game-cover-editor"><div><h3>Game cover</h3><p>Choose a JPEG, WebP, PNG or GIF for your game icon and preview.</p>'+
  '<input type="file" id="gameCoverFile" accept="image/jpeg,image/png,image/webp,image/gif"></div>'+
@@ -292,7 +293,7 @@ function renderGameTool(){
  '<button type="button" class="button secondary" id="gamePreviewBtn">Preview game</button>'+
  '<button class="button primary" type="submit">Publish / save game ↗</button></div></form></div>';
  for(const field of ['title','description','tags'])root.querySelector('[name="'+field+'"]').oninput=captureGameForm;
- $('#gameRights').oninput=captureGameForm;
+ // No manual file reference is needed: uploaded media is tracked by the server.
  $('#memberGameType').onchange=e=>{captureGameForm();chosenGameType=e.target.value;renderMemberEditor(approved)};
  $('#gameCoverFile').onchange=e=>{
   const f=e.target.files?.[0];if(!f)return;
@@ -314,13 +315,16 @@ function renderGameTool(){
   if(submit.disabled)return;
   const type=chosenGameType,config=makeGameConfig(type);
   if(!config)return msg('Complete your game configuration first.');
+  const pending=[...newGame.nodes,...Object.values(newGame.outcomes||{}).flat()].some(media=>media?.previewObjectUrl && !media?.uploadId);
+  if(pending)return msg('An image is still uploading or failed to upload. Retry the affected file before saving.');
+
   const name=gameFormDraft.title.trim();if(!name)return msg('Enter a game title.');
   submit.disabled=true;const info=$('#gameSaveStatus');
   try {
    const file=$('#gameCoverFile')?.files?.[0];
    if(file){
     if(!window.LUSTSINO_UPLOAD)throw Error('Uploader unavailable; refresh the site.');
-    const uploaded=await window.LUSTSINO_UPLOAD.upload(file,gameFormDraft.rights_ref,text=>info.textContent=text);
+    const uploaded=await window.LUSTSINO_UPLOAD.upload(file,'',text=>info.textContent=text);
     gameFormDraft.cover_url=uploaded.url;
    }
    const instant=profile?.creator_status==='verified'||!!core()?.admin;
@@ -335,7 +339,7 @@ function renderGameTool(){
     if(retry.error)throw retry.error;
     published=false;
    }else if(error)throw error;
-   if(info)info.textContent=published?'Game published!':'Saved as a private draft. Media assets must be cleared before public release.';
+   if(info)info.textContent=published?'Game published in the arcade!':'Game saved as a private draft. Verify your House Creator status and finish all uploads to publish.';
    if(published){await core().refreshRemote();document.querySelector('[data-route="games"]')?.click();}
    else setTimeout(()=>renderMyDrafts(),700);
   }catch(error){if(info)info.textContent=error.message||'Game could not be saved.';msg(error.message||'Game could not be saved.')}
@@ -359,9 +363,9 @@ function makeGameConfig(type){
   return {tagCards:cards,reelSpeedMs:Math.max(150,Math.min(650,Number($('#memberSpecialSpeed')?.value)||210)),
           voice,lockMediaAssignments:true,rotateMedia:false};
  }
- if(type==='hotspots'){if(newGame.nodes.length<2)return null;const nodes={};newGame.nodes.forEach((n,i)=>nodes['round_'+String(i+1).padStart(2,'0')]=JSON.parse(JSON.stringify(n)));return {nodes,startNode:'round_01',totalRounds:newGame.nodes.length-1,lockMediaAssignments:true,rotateMedia:false}}
+ if(type==='hotspots'){if(newGame.nodes.length<2)return null;const nodes={};newGame.nodes.forEach((n,i)=>{const copy=JSON.parse(JSON.stringify(n));delete copy.previewObjectUrl;nodes['round_'+String(i+1).padStart(2,'0')]=copy});return {nodes,startNode:'round_01',totalRounds:newGame.nodes.length-1,lockMediaAssignments:true,rotateMedia:false}}
  const choices=(newGame.outcomes?.[type]||[]).map((entry,i)=>({
-  label:entry.label||'Choice '+(i+1),mediaId:entry.mediaId||'',mediaUrl:entry.mediaUrl||'',
+  label:entry.label||'Choice '+(i+1),mediaId:entry.mediaId||'',mediaUrl:entry.mediaUrl||'',uploadId:entry.uploadId||'',
   seconds:Number(entry.seconds)||15,prompt:entry.label||'Choice '+(i+1)
  }));
  if(type==='wheel')return {slices:choices};
@@ -397,21 +401,26 @@ function renderMemberEditor(approved){
     '<label>Choice label<input data-choice-label="'+i+'" maxlength="80" value="'+esc(item.label||'')+'"></label>'+
     '<label>Cleared media<select data-choice-media="'+i+'">'+approvalSelect(item.mediaId)+'</select></label>'+
     '<label>Upload your own media<input type="file" data-choice-upload="'+i+'" accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm"></label>'+
-    (item.mediaUrl?'<div class="outcome-media-preview">'+( /\.(mp4|webm)([?#]|$)/i.test(item.mediaUrl)?'<video src="'+esc(item.mediaUrl)+'" controls muted playsinline></video>':'<img src="'+esc(item.mediaUrl)+'" alt="Outcome media">')+'</div>':'')+
+    ((item.previewObjectUrl||item.mediaUrl)?'<div class="outcome-media-preview">'+( (item.previewMime||'').startsWith('video/')||/\.(mp4|webm)([?#]|$)/i.test(item.mediaUrl||'')?'<video src="'+esc(item.previewObjectUrl||item.mediaUrl)+'" controls muted playsinline></video>':'<img src="'+esc(item.previewObjectUrl||item.mediaUrl)+'" alt="Outcome media">')+'</div>':'')+
     '<label>Reveal time: <b id="choiceSeconds_'+i+'">'+(item.seconds||15)+'s</b><input type="range" min="3" max="60" step="1" value="'+(item.seconds||15)+'" data-choice-seconds="'+i+'"></label>'+
     '<p class="game-file-status" data-choice-status="'+i+'"></p></div>').join('')+'</div></section>';
   $all('[data-choice-label]',root).forEach(input=>input.oninput=()=>{rows[Number(input.dataset.choiceLabel)].label=input.value});
-  $all('[data-choice-media]',root).forEach(input=>input.onchange=()=>{rows[Number(input.dataset.choiceMedia)].mediaId=input.value});
+  $all('[data-choice-media]',root).forEach(input=>input.onchange=()=>{rows[Number(input.dataset.choiceMedia)].mediaId=input.value;rows[Number(input.dataset.choiceMedia)].mediaUrl='';rows[Number(input.dataset.choiceMedia)].uploadId='';if(rows[Number(input.dataset.choiceMedia)].previewObjectUrl){URL.revokeObjectURL(rows[Number(input.dataset.choiceMedia)].previewObjectUrl);rows[Number(input.dataset.choiceMedia)].previewObjectUrl=''}renderMemberEditor(approved)});
   $all('[data-choice-seconds]',root).forEach(input=>input.oninput=()=>{const i=Number(input.dataset.choiceSeconds);rows[i].seconds=Number(input.value);$('#choiceSeconds_'+i).textContent=input.value+'s'});
   $all('[data-choice-upload]',root).forEach(input=>input.onchange=async()=>{
    const file=input.files?.[0],i=Number(input.dataset.choiceUpload);
-   if(!file)return;const ref=String($('#gameRights')?.value||'').trim();
-   const status=$('[data-choice-status="'+i+'"]',root);
+   if(!file)return;const ref='';
+   if(rows[i].previewObjectUrl)URL.revokeObjectURL(rows[i].previewObjectUrl);
+   rows[i].previewObjectUrl=URL.createObjectURL(file);
+   rows[i].previewMime=file.type;
+   renderMemberEditor(approved); // Show local media before Bunny finishes.
+   const status=$('#gameSaveStatus');
    try{
     if(!window.LUSTSINO_UPLOAD)throw Error('Uploader unavailable; reload the site.');
     const output=await window.LUSTSINO_UPLOAD.upload(file,ref,text=>{if(status)status.textContent=text});
-    rows[i].mediaUrl=output.url;rows[i].mediaId='';
-    msg('Image uploaded for outcome '+(i+1)+'. Add a cleared media assignment before public release.');
+    rows[i].mediaUrl=output.url;rows[i].uploadId=output.uploadId;rows[i].mediaId='';
+    if(rows[i].previewObjectUrl){URL.revokeObjectURL(rows[i].previewObjectUrl);rows[i].previewObjectUrl='';}
+    msg('Outcome '+(i+1)+' image uploaded successfully.');
     renderMemberEditor(approved);
    }catch(error){if(status)status.textContent=error.message||'Upload failed.'}
   });
@@ -422,7 +431,7 @@ function renderMemberEditor(approved){
  newGame.currentNode=idx;
  const node=newGame.nodes[idx],end=idx===count-1;
  const selected=approved.find(m=>m.id===node.mediaId);
- const visual=safeUrl(node.mediaUrl||selected?.url||'');
+ const visual=(node.previewObjectUrl?.startsWith('blob:')?node.previewObjectUrl:'')||safeUrl(node.mediaUrl||selected?.url||'');
  root.innerHTML='<section class="game-step-panel path-member-editor">'+
   '<div class="overline">CIRCLE PATHS DESIGNER</div><h3>Build each round visually</h3>'+
   '<div class="path-toolbar">'+
@@ -435,7 +444,8 @@ function renderMemberEditor(approved){
   '<div class="round-media-tools"><label>Choose cleared media<select id="memberNodeMedia">'+approvalSelect(node.mediaId)+'</select></label>'+
   '<label>Add an image/GIF for this round<input id="memberNodeFile" type="file" accept="image/jpeg,image/png,image/webp,image/gif"></label></div>'+
   (visual?'<p class="micro-note">Previewing your selected round media. Public release requires a cleared media assignment.</p>':'<p class="micro-note">Select an image to place circles on it.</p>')+
-  '<div class="member-hotspot-canvas" id="memberCanvas" style="background-image:'+(visual?'linear-gradient(#0002,#0005),url(&quot;'+esc(visual)+'&quot;)':'none')+'">'+
+  '<div class="member-hotspot-canvas '+(visual?'has-photo':'no-photo')+'" id="memberCanvas">'+
+  (visual?'<img class="member-round-photo" src="'+esc(visual)+'" alt="Round '+(idx+1)+' artwork for circle placement" draggable="false">':'<div class="member-round-empty">Upload a picture to position your circles accurately.</div>')+
   (node.spots||[]).map((spot,i)=>'<button class="member-hotspot" type="button" data-index="'+i+'" style="left:'+spot.x+'%;top:'+spot.y+'%;width:'+spot.w+'%;height:'+spot.h+'%;border-radius:'+(spot.shape==='oval'?'50%':'12px')+'">'+esc(spot.label)+'</button>').join('')+
   '<span class="canvas-caption">'+(end?'FINAL REVEAL':'DRAG SPOTS · TAP IMAGE TO ADD A CIRCLE')+'</span></div>'+
   '<div class="round-timing"><label>Reveal duration: <strong id="roundSecondsLabel">'+(node.preview_seconds||5)+' sec</strong>'+
@@ -460,22 +470,43 @@ function renderMemberEditor(approved){
   newGame.currentNode=0;renderMemberEditor(approved);
  };
  $('#memberNodeTitle').oninput=e=>{node.title=e.target.value};
- $('#memberNodeMedia').onchange=e=>{node.mediaId=e.target.value;node.mediaUrl='';renderMemberEditor(approved)};
+ $('#memberNodeMedia').onchange=e=>{node.mediaId=e.target.value;node.mediaUrl='';node.uploadId='';renderMemberEditor(approved)};
  $('#memberNodeFile').onchange=async e=>{
   const file=e.target.files?.[0];if(!file)return;
-  const ref=String($('#gameRights')?.value||'').trim();
+  const ref='';
+  if(node.previewObjectUrl)URL.revokeObjectURL(node.previewObjectUrl);
+  node.previewObjectUrl=URL.createObjectURL(file);
+  renderMemberEditor(approved); // Local preview appears before the network upload finishes.
   try {
    if(!window.LUSTSINO_UPLOAD)throw Error('Uploader unavailable; refresh the page.');
    const result=await window.LUSTSINO_UPLOAD.upload(file,ref,text=>{const el=$('#gameSaveStatus');if(el)el.textContent=text});
-   node.mediaUrl=result.url;node.mediaId='';renderMemberEditor(approved);
-   msg('Round '+(idx+1)+' image saved. Add the cleared media assignment before publishing.');
+   node.mediaUrl=result.url;node.uploadId=result.uploadId;node.mediaId='';if(node.previewObjectUrl){URL.revokeObjectURL(node.previewObjectUrl);node.previewObjectUrl='';}renderMemberEditor(approved);
+   msg('Round '+(idx+1)+' image uploaded successfully.');
   }catch(error){msg(error.message||'Round image upload failed.')}
  };
  $('#roundSeconds').oninput=e=>{node.preview_seconds=Number(e.target.value);$('#roundSecondsLabel').textContent=e.target.value+' sec'};
  const canvas=$('#memberCanvas');
+ const roundPhoto=canvas?.querySelector('.member-round-photo');
+ if(roundPhoto){
+  const fitRoundPhoto=()=>{
+   const ratio=(roundPhoto.naturalWidth||3)/(roundPhoto.naturalHeight||4);
+   const maxWidth=Math.min(720,root.clientWidth||720);
+   const maxHeight=Math.max(230,window.innerHeight*.68);
+   const width=Math.max(130,Math.min(maxWidth,maxHeight*ratio));
+   canvas.style.setProperty('width',width+'px','important');
+   canvas.style.height='auto';
+   roundPhoto.style.width='100%';
+   roundPhoto.style.maxWidth='100%';
+   roundPhoto.style.maxHeight='none';
+   roundPhoto.style.height='auto';
+  };
+  roundPhoto.addEventListener('load',fitRoundPhoto,{once:true});
+  if(roundPhoto.complete && roundPhoto.naturalWidth>0)fitRoundPhoto();
+ }
  canvas.onclick=e=>{
   if(e.target.closest('button')||node.spots.length>=8||end)return;
-  const b=canvas.getBoundingClientRect(),x=Math.round((e.clientX-b.left)/b.width*100),y=Math.round((e.clientY-b.top)/b.height*100);
+  if(!visual){msg('Upload a round image before placing circles.');return;}
+  const b=canvas.getBoundingClientRect(),x=Math.max(0,Math.min(100,Math.round((e.clientX-b.left)/b.width*100))),y=Math.max(0,Math.min(100,Math.round((e.clientY-b.top)/b.height*100)));
   node.spots.push({x,y,w:18,h:15,shape:'oval',label:String(node.spots.length+1),next:'round_'+String(idx+2).padStart(2,'0')});
   renderMemberEditor(approved);
  };
