@@ -481,23 +481,51 @@ function renderMemberEditor(approved){
  $all('[data-remove-hotspot]',root).forEach(button=>button.onclick=()=>{node.spots.splice(Number(button.dataset.removeHotspot),1);renderMemberEditor(approved)});
 }
 async function renderMyDrafts(){
- const root=$('#memberToolBody');
- root.innerHTML='<p>Loading your saved content…</p>';
+ const root=$('#memberToolBody');if(!root)return;root.innerHTML='<div class="member-card">Loading your creations…</div>';
  const [posts,games]=await Promise.all([
-  db().from('community_posts').select('id,title,review_status,published').eq('owner_id',viewer.id).order('created_at',{ascending:false}).limit(50),
-  db().from('experiences').select('id,title,review_status,published').eq('author_id',viewer.id).order('created_at',{ascending:false}).limit(50)
+  db().from('community_posts').select('id,title,review_status,published,created_at').eq('owner_id',viewer.id).order('created_at',{ascending:false}).limit(100),
+  db().from('experiences').select('id,title,review_status,published,created_at').eq('author_id',viewer.id).order('created_at',{ascending:false}).limit(100)
  ]);
+ if(posts.error||games.error){root.innerHTML='<div class="member-card">Could not load your drafts. '+esc(posts.error?.message||games.error?.message)+'</div>';return;}
  const canPublish=profile?.creator_status==='verified'||!!core()?.admin;
- const gameRows=(games.data||[]).map(g=>'<div class="draft-row"><span>'+esc(g.title)+'</span><small>'+(g.published?'Live':'Saved draft')+'</small></div>').join('');
- const postRows=(posts.data||[]).map(p=>'<div class="draft-row"><span>'+esc(p.title)+'</span><small>'+(p.published?'Live':'Saved draft')+'</small>'+
-  (canPublish&&!p.published?'<button type="button" class="button secondary smallish" data-publish-post="'+esc(p.id)+'">Publish</button>':'')+'</div>').join('');
- root.innerHTML='<div class="member-card"><h2>Your creations</h2><p>Your drafts stay private. Once verified, completed Bunny uploads can go live immediately without another review.</p><h3>Games</h3>'+
-  (gameRows||'<p>No games yet.</p>')+'<h3>Media posts</h3>'+(postRows||'<p>No posts yet.</p>')+'</div>';
- $all('[data-publish-post]',root).forEach(btn=>btn.onclick=async()=>{
+ const gameRows=(games.data||[]).map(game=>
+  '<article class="creator-draft-card"><div><strong>'+esc(game.title)+'</strong>'+
+  '<span class="draft-state">'+(game.published?'Live game':'Private game draft')+'</span></div>'+
+  (!game.published?'<button type="button" class="button subtle" data-delete-game="'+esc(game.id)+'">Delete draft</button>':'')+'</article>').join('');
+ const postRows=(posts.data||[]).map(post=>
+  '<article class="creator-draft-card"><div><strong>'+esc(post.title)+'</strong>'+
+  '<span class="draft-state">'+(post.published?'Live post':'Private post draft')+'</span></div>'+
+  '<div class="draft-card-buttons">'+(canPublish&&!post.published?'<button type="button" class="button secondary" data-publish-post="'+esc(post.id)+'">Publish</button>':'')+
+  (!post.published?'<button type="button" class="button subtle" data-delete-post="'+esc(post.id)+'">Delete draft</button>':'')+'</div></article>').join('');
+ root.innerHTML='<div class="member-card"><span class="overline">YOUR WORKSPACE</span><h2>My creations</h2>'+
+  '<p>Find every game and feed post you have made. Private drafts are only visible to you.</p>'+
+  '<div class="studio-actions"><button type="button" class="button secondary" data-tool="game">＋ Build game</button>'+
+  '<button type="button" class="button secondary" data-tool="post">＋ New post</button></div>'+
+  '<h3>Games</h3>'+(gameRows||'<p>No games created yet.</p>')+
+  '<h3>Feed posts</h3>'+(postRows||'<p>No feed posts yet.</p>')+'</div>';
+ root.querySelectorAll('[data-tool]').forEach(btn=>btn.onclick=()=>{
+  root.closest('#communityPanel')?.querySelectorAll('.member-tool-tabs [data-tool]').forEach(tab=>tab.classList.toggle('active',tab.dataset.tool===btn.dataset.tool));
+  renderTool(btn.dataset.tool);
+ });
+ root.querySelectorAll('[data-delete-game],[data-delete-post]').forEach(button=>button.onclick=async()=>{
+  const game=!!button.dataset.deleteGame,id=game?button.dataset.deleteGame:button.dataset.deletePost;
+  if(!confirm('Permanently delete this private '+(game?'game':'post')+' draft?'))return;
+  button.disabled=true;
+  const table=game?'experiences':'community_posts',owner=game?'author_id':'owner_id';
+  const {data,error}=await db().from(table).delete().eq('id',id).eq(owner,viewer.id).eq('published',false).select('id');
+  if(error){button.disabled=false;return msg(error.message)}
+  if(!data?.length){button.disabled=false;return msg('Draft was not deleted. Check your account permissions.')}
+  if(game)await core()?.refreshRemote?.();
+  msg('Draft deleted.');renderMyDrafts();
+ });
+ root.querySelectorAll('[data-publish-post]').forEach(btn=>btn.onclick=async()=>{
   btn.disabled=true;
-  const {error}=await db().from('community_posts').update({published:true,review_status:'approved'}).eq('id',btn.dataset.publishPost).eq('owner_id',viewer.id);
-  if(error){btn.disabled=false;return msg('Cannot publish this draft: '+error.message+'. Confirm it is your completed Bunny upload, with the same rights reference and verified House Creator access.');}
-  msg('Post published.');renderMyDrafts();
+  const {data,error}=await db().from('community_posts')
+   .update({published:true,review_status:'approved'})
+   .eq('id',btn.dataset.publishPost).eq('owner_id',viewer.id).select('id');
+  if(error||!data?.length){btn.disabled=false;return msg((error?.message||'Could not publish')+
+   '. Publishing requires your verified creator status and a matching completed Bunny upload.')}
+  msg('Your post is now live.');renderMyDrafts();
  });
 }
 async function renderReviewTool(){
