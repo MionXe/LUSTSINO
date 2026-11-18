@@ -100,7 +100,7 @@
   '<label>On <input type="checkbox" data-track-active="'+escape(t.id)+'"'+(t.active?' checked':'')+'></label>'+
   '<button type="button" class="button subtle" data-track-remove="'+escape(t.id)+'">Remove</button></div>').join('')+'</div>'+
   '<form id="siteTrackForm" class="site-designer-form"><label>Track name<input name="title" required maxlength="120"></label>'+
-  '<label>MP3 HTTPS URL<input type="url" name="audio_url" required placeholder="https://.../soundtrack.mp3"></label>'+
+  '<label>Existing MP3 HTTPS URL (optional)<input type="url" name="audio_url" placeholder="https://.../soundtrack.mp3"></label>'+  '<label>Or upload an MP3<input type="file" id="siteTrackFile" accept="audio/mpeg,.mp3"></label>'+  '<label>Audio license or permission reference<input id="siteTrackRights" placeholder="Required to upload"></label>'+
   '<label>Music credit / attribution<input name="credit" maxlength="200" placeholder="Creator, license"></label>'+
   '<label>Queue order<input type="number" name="sort_order" min="0" max="10000" value="10"></label>'+
   '<button type="submit" class="button secondary">Add soundtrack</button></form></section></div>';
@@ -140,8 +140,11 @@
    if(error)return core().notify(error.message);await renderMaster(root);
   });
   $('#siteTrackForm').onsubmit=async e=>{
-   e.preventDefault();const form=new FormData(e.currentTarget),url=allowedUrl(form.get('audio_url'));
-   if(!url)return core().notify('Audio URL must use HTTPS.');
+   e.preventDefault();const form=new FormData(e.currentTarget);
+   let url=allowedUrl(form.get('audio_url'));const file=$('#siteTrackFile')?.files?.[0];
+   try{if(file){const result=await window.LUSTSINO_UPLOAD.upload(file,$('#siteTrackRights')?.value||'',text=>core().notify(text));url=result.url;}}
+   catch(error){return core().notify(error.message||'Audio upload failed.')}
+   if(!url)return core().notify('Enter an HTTPS audio URL or choose an MP3 to upload.');
    const payload={title:String(form.get('title')).trim(),audio_url:url,
      credit:String(form.get('credit')||'').trim(),sort_order:Number(form.get('sort_order'))||10,active:true};
    const {error}=await db().from('site_playlist').insert(payload);
