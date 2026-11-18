@@ -114,3 +114,5 @@
  .game-maker-actions{position:static}
  .site-track-line{flex-wrap:wrap}
 }
+
+.feed-new-notice[hidden]{display:none!important}.feed-new-notice{margin-left:4px;white-space:nowrap}
