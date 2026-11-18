@@ -469,12 +469,13 @@ function renderMemberEditor(approved){
   $all('[data-'+field+']',root).forEach(input=>{
    const index=Number(input.dataset[field]);
    input.oninput=()=>{
-    if(field==='label')node.spots[index].label=input.value;
-    else if(field==='shape')node.spots[index].shape=input.value;
-    else if(field==='width')node.spots[index].w=Number(input.value);
-    else if(field==='height')node.spots[index].h=Number(input.value);
-    else if(field==='next')node.spots[index].next=input.value;
-    if(field==='label'||field==='shape'||field==='width'||field==='height')renderMemberEditor(approved);
+    const spot=node.spots[index],button=canvas.querySelector('[data-index="'+index+'"]');
+    if(!spot)return;
+    if(field==='label'){spot.label=input.value;if(button)button.textContent=input.value;}
+    else if(field==='shape'){spot.shape=input.value;if(button)button.style.borderRadius=input.value==='oval'?'50%':'12px';}
+    else if(field==='width'){spot.w=Number(input.value);if(button)button.style.width=spot.w+'%';}
+    else if(field==='height'){spot.h=Number(input.value);if(button)button.style.height=spot.h+'%';}
+    else if(field==='next'){spot.next=input.value;}
    };
   });
  }
