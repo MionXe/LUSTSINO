@@ -2,7 +2,7 @@
 (()=>{'use strict';
  const api=()=>window.VYRA_CONFIG?.uploadEndpoint;
  const client=()=>window.LUSTSINO_CORE?.client;
- const supported=new Set(['image/jpeg','image/png','image/webp','image/gif','video/mp4','video/webm']);
+ const supported=new Set(['image/jpeg','image/png','image/webp','image/gif','video/mp4','video/webm','audio/mpeg']);
  const maxByType=t=>t.startsWith('video/')?50*1024*1024:20*1024*1024;
  async function upload(file,rightsReference,onProgress=()=>{}){
   if(!(file instanceof File))throw Error('Choose an image, GIF, or short video first.');
