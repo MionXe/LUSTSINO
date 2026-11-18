@@ -10,7 +10,7 @@ const cleanTags=s=>[...new Set(String(s||'').toLowerCase().split(/[\s,#]+/).map(
 const safeUrl=s=>{try{const u=new URL(s);return u.protocol==='https:'?u.href:''}catch{return ''}};
 const policyVersion='2026-11-17';
 let viewer=null,profile=null,selectedPost=null,gameRun=null,feedPosts=[],chosenGameType='hotspots';
-let feedOffset=0,feedHasMore=true,feedLoading=false,feedObserver=null;
+let feedOffset=0,feedHasMore=true,feedLoading=false,feedObserver=null,feedMoreObserver=null;
 let newGame={type:'hotspots',title:'',description:'',tags:[],nodes:[],currentNode:0,mediaId:'',outcomes:{}};
 let gameFormDraft={title:'',description:'',tags:'',cover_url:'',rights_ref:''};
 const initNode=i=>({round:i+1,title:`Round ${i+1}`,subtitle:'Choose one numbered spot. Follow only the region you selected.',mediaId:'',mediaUrl:'',preview_seconds:5,spots:[{label:'A',x:35,y:45,w:20,h:18,shape:'oval',next:`round_${String(i+2).padStart(2,'0')}`},{label:'B',x:67,y:65,w:15,h:20,shape:'oval',next:`round_${String(i+2).padStart(2,'0')}`}]});
@@ -26,6 +26,17 @@ function init(){
  document.addEventListener('click',e=>{const f=e.target.closest('[data-route="feed"]');if(f)setTimeout(loadFeed,20);const r=e.target.closest('[data-route="community"]');if(r)setTimeout(renderCommunity,20)});
  const search=$('#communitySearch');search?.addEventListener('input',renderSearch);
  $('#feedRefresh')?.addEventListener('click',()=>loadFeed());
+ const refreshNotice=document.createElement('button');
+ refreshNotice.type='button';refreshNotice.className='feed-new-notice button secondary';
+ refreshNotice.textContent='✦ New posts · refresh feed';
+ refreshNotice.hidden=true;refreshNotice.onclick=()=>{refreshNotice.hidden=true;loadFeed()};
+ $('#view-feed .feed-toolbar')?.appendChild(refreshNotice);
+ setInterval(async()=>{
+  if(!db()||!feedPosts.length||!$('#view-feed')?.classList.contains('show')||document.hidden)return;
+  const {data,error}=await db().from('community_posts').select('id').eq('published',true)
+    .eq('review_status','approved').order('created_at',{ascending:false}).limit(1);
+  if(!error&&data?.[0]&&data[0].id!==feedPosts[0]?.id)refreshNotice.hidden=false;
+ },60000);
  document.addEventListener('visibilitychange',()=>{if(document.hidden)$all('#communityFeed video').forEach(v=>v.pause())});
  newGame.nodes=[initNode(0),initNode(1),{round:3,title:'Final reveal',subtitle:'Your surprise',mediaId:'',mediaUrl:'',seconds:15,spots:[]}];
  setTimeout(ready,500);
@@ -77,7 +88,7 @@ function renderSearch(){const root=$('#searchResults');if(!root)return;const q=(
 async function loadFeed({append=false}={}){
  const root=$('#communityFeed'),pager=$('#feedPagination');if(!root||!db()||feedLoading)return;
  feedLoading=true;
- if(!append){feedOffset=0;feedHasMore=true;feedPosts=[];feedObserver?.disconnect();root.innerHTML='<div class="feed-message">Loading the latest posts…</div>';}
+ if(!append){$('#view-feed .feed-new-notice')?.setAttribute('hidden','');feedOffset=0;feedHasMore=true;feedPosts=[];feedObserver?.disconnect();feedMoreObserver?.disconnect();root.innerHTML='<div class="feed-message">Loading the latest posts…</div>';}
  const pageSize=24;
  const {data,error}=await db().from('community_posts')
   .select('id,title,description,creator_credit,source_url,media_url,media_type,tags,created_at,owner_id')
@@ -109,8 +120,21 @@ async function loadFeed({append=false}={}){
     '<div class="tag-list">'+(p.tags||[]).map(tag=>'<button class="tag-chip" data-feed-tag="'+esc(tag)+'">#'+esc(tag)+'</button>').join('')+'</div></div></article>';
  }).join('');
  if(append)root.insertAdjacentHTML('beforeend',markup);else root.innerHTML=markup;
- if(pager){pager.innerHTML=feedHasMore?'<button type="button" class="button secondary" id="feedLoadMore">Load more posts ↓</button>':
- '<p class="feed-end">You’re all caught up.</p>';const more=$('#feedLoadMore');if(more)more.onclick=()=>loadFeed({append:true});}
+ if(pager){
+  pager.innerHTML=feedHasMore?'<button type="button" class="button secondary" id="feedLoadMore">Load more posts ↓</button>':
+   '<p class="feed-end">You’re all caught up.</p>';
+  const more=$('#feedLoadMore');
+  if(more){
+   more.onclick=()=>loadFeed({append:true});
+   if('IntersectionObserver' in window){
+    if(!feedMoreObserver)feedMoreObserver=new IntersectionObserver(entries=>{
+     if(entries.some(x=>x.isIntersecting)&&!feedLoading&&feedHasMore&&$('#view-feed')?.classList.contains('show'))
+      loadFeed({append:true});
+    },{rootMargin:'400px 0px',threshold:0});
+    feedMoreObserver.disconnect();feedMoreObserver.observe(more);
+   }
+  }
+ }
  $all('[data-like]',root).forEach(b=>b.onclick=()=>toggleLike(b));
  $all('[data-report-post]',root).forEach(button=>button.onclick=()=>{
   const postId=button.dataset.reportPost;
